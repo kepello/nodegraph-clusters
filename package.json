@@ -1,0 +1,47 @@
+{
+  "name": "@kepello/nodegraph-clusters",
+  "version": "0.1.0",
+  "description": "Recovered-cluster overlay for @kepello/nodegraph: Louvain community detection over L0 element dependencies plus TF-IDF naming. Third layer of the Layered Code Abstraction arc.",
+  "type": "module",
+  "main": "dist/index.js",
+  "types": "dist/index.d.ts",
+  "exports": {
+    ".": {
+      "types": "./dist/index.d.ts",
+      "default": "./dist/index.js"
+    }
+  },
+  "files": [
+    "dist/",
+    "LICENSE",
+    "README.md"
+  ],
+  "scripts": {
+    "build": "tsc -p tsconfig.json",
+    "test": "node --test --import tsx 'src/**/*.test.ts'",
+    "prepublishOnly": "npm run build"
+  },
+  "peerDependencies": {
+    "@kepello/nodegraph-core": "^1.1.1"
+  },
+  "dependencies": {
+    "graphology": "^0.25.4",
+    "graphology-communities-louvain": "^2.0.1",
+    "graphology-types": "^0.24.8"
+  },
+  "devDependencies": {
+    "@types/node": "^22.0.0",
+    "tsx": "^4.19.0",
+    "typescript": "^5.6.0",
+    "@kepello/nodegraph-core": "file:../nodegraph-core"
+  },
+  "publishConfig": {
+    "registry": "https://npm.pkg.github.com"
+  },
+  "license": "MIT",
+  "author": "Carl Lance",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/kepello/nodegraph-clusters.git"
+  }
+}
