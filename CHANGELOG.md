@@ -2,6 +2,22 @@
 
 All notable changes to `@kepello/nodegraph-clusters`. Format follows [Keep a Changelog](https://keepachangelog.com/).
 
+## [0.2.0] — 2026-05-17
+
+Additive — `computeClusters` now guarantees output determinism regardless of input element / dependency ordering. Closes Fathom row 5.0.7 (`louvain-l3-non-determinism`).
+
+### Fixed
+
+- Two sequential `fathom analyze` runs on the same unchanged workspace had produced different L3 cluster counts (885 vs 892). Even with a seeded RNG, Louvain's modularity heuristic processes nodes in graph-insertion order during community-merge iteration, so ambiguous community boundaries can resolve differently when the caller's `queryNodes` / `queryEdges` return rows in a different order across runs. Fix: sort `input.elements` by id and `input.dependencies` by `(source, target)` at the top of `computeClusters` before constructing the graphology graph. All downstream loops (community grouping, dependsOn aggregation, final assignment map) iterate the same canonical sorted list.
+
+### Tests
+
+- New `computeClusters — determinism: reordered inputs produce identical clusters (row 5.0.7)` test exercises a 200-node graph with ambiguous community boundaries; runs against canonical, reversed, and shuffled inputs and asserts identical `clusterId` sets. 11/11 tests pass.
+
+### Compatibility
+
+- Output values may shift on a given graph relative to 0.1.x (the algorithm walks a deterministically-sorted node order now, not whatever order the caller happened to pass), but become stable across re-runs. Callers that cached cluster IDs from 0.1.x will see one invalidation on first run under 0.2.0; subsequent runs are stable.
+
 ## [0.1.0] — 2026-05-14
 
 Initial publish. Third layer of the workspace-level Layered Code Abstraction arc (Fathom work row `l3-cluster-overlay` 3.1.3, per `docs/code_abstraction.md` L3).

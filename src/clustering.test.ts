@@ -14,7 +14,7 @@
 
 import { test } from "node:test";
 import { strict as assert } from "node:assert";
-import { computeClusters } from "./clustering.js";
+import { computeClusters, type ElementInput, type DependencyInput } from "./clustering.js";
 
 test("computeClusters — empty input returns empty result", () => {
   const result = computeClusters({ elements: [], dependencies: [] });
@@ -85,6 +85,69 @@ test("computeClusters — determinism: same input + seed produces same clusters"
     [...a.assignments.entries()].sort(),
     [...b.assignments.entries()].sort(),
   );
+});
+
+test("computeClusters — determinism: reordered inputs produce identical clusters (row 5.0.7)", () => {
+  // Regression for Fathom row 5.0.7. Two sequential `fathom analyze`
+  // runs on the same workspace produced different L3 cluster counts
+  // (885 vs 892) because the caller's `queryNodes` / `queryEdges`
+  // calls returned rows in a different order across runs. computeClusters
+  // must canonicalize input order so the result is order-invariant.
+  const elements: ElementInput[] = [];
+  const dependencies: DependencyInput[] = [];
+  // 200 nodes split into ambiguous-boundary clusters: 4 groups of 50 with
+  // overlapping inter-group edges that push Louvain into borderline merges.
+  for (let i = 0; i < 200; i++) {
+    elements.push({ id: `n${i.toString().padStart(3, "0")}`, name: `Node${i}`, contentHash: `h${i}` });
+  }
+  for (let g = 0; g < 4; g++) {
+    const start = g * 50;
+    for (let i = start; i < start + 50; i++) {
+      for (let j = i + 1; j < start + 50; j++) {
+        if (((i * 17 + j * 31) % 7) < 3) {
+          dependencies.push({ source: `n${i.toString().padStart(3, "0")}`, target: `n${j.toString().padStart(3, "0")}`, weight: 5 });
+        }
+      }
+    }
+  }
+  // Heavy inter-group bridges that make borders ambiguous.
+  for (let k = 0; k < 100; k++) {
+    const a = (k * 13) % 200;
+    const b = (k * 41 + 7) % 200;
+    if (a !== b) {
+      dependencies.push({ source: `n${a.toString().padStart(3, "0")}`, target: `n${b.toString().padStart(3, "0")}`, weight: 2 });
+    }
+  }
+
+  // Canonical order.
+  const r1 = computeClusters({ elements, dependencies });
+  // Reverse.
+  const r2 = computeClusters({
+    elements: [...elements].reverse(),
+    dependencies: [...dependencies].reverse(),
+  });
+  // Shuffle.
+  const shuffled = [...elements];
+  const shuffledDeps = [...dependencies];
+  let s = 42;
+  const rng = () => { s = (s * 1103515245 + 12345) & 0x7fffffff; return s / 0x7fffffff; };
+  for (let i = shuffled.length - 1; i > 0; i--) {
+    const j = Math.floor(rng() * (i + 1));
+    [shuffled[i], shuffled[j]] = [shuffled[j], shuffled[i]];
+  }
+  for (let i = shuffledDeps.length - 1; i > 0; i--) {
+    const j = Math.floor(rng() * (i + 1));
+    [shuffledDeps[i], shuffledDeps[j]] = [shuffledDeps[j], shuffledDeps[i]];
+  }
+  const r3 = computeClusters({ elements: shuffled, dependencies: shuffledDeps });
+
+  const ids1 = r1.clusters.map((c) => c.clusterId).sort();
+  const ids2 = r2.clusters.map((c) => c.clusterId).sort();
+  const ids3 = r3.clusters.map((c) => c.clusterId).sort();
+  assert.deepEqual(ids1, ids2, "reversed input must produce identical cluster IDs");
+  assert.deepEqual(ids1, ids3, "shuffled input must produce identical cluster IDs");
+  assert.equal(r1.clusters.length, r2.clusters.length);
+  assert.equal(r1.clusters.length, r3.clusters.length);
 });
 
 test("computeClusters — clusterId is derived from member contentHashes, not element ids", () => {
