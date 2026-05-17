@@ -2,6 +2,26 @@
 
 All notable changes to `@kepello/nodegraph-clusters`. Format follows [Keep a Changelog](https://keepachangelog.com/).
 
+## [0.3.0] — 2026-05-17
+
+Additive — `ClusterOverlay.liveMemberCount(clusterId)` returns the current member count derived from live `groups` edges, distinct from `metadata.memberCount` (the at-insert-time snapshot). Closes Fathom row 5.1.4.3 (`mcp-cluster-members-inconsistency`).
+
+### Added
+
+- `ClusterOverlay.liveMemberCount(clusterId): number` — counts live `groups` edges from the cluster node. Returns 0 for unknown clusters or clusters with all members tombstoned. Wraps `membersOf(clusterId).length` for the common case.
+
+### Why
+
+`metadata.memberCount` is set at insert time from the algorithm's computed value and persists across the cluster node's lifetime. When member elements get tombstoned (substrate's `tombstoneNode` cascades to incoming edges, including `groups` edges from this cluster), the cluster's live-edge count drifts below `metadata.memberCount`. On the Fathom workspace this manifested as cluster `43a96f6237e737ea` reporting `metadata.memberCount=132` but having only 1 live `groups` edge — surfaced by the 5.1.4 Opus post-flip pilot as a substrate-correctness gap.
+
+`metadata.memberCount` is retained as the at-insert snapshot (don't change cluster contentHash; preserves the algorithm's intent at the time it ran). Consumers wanting current count use `liveMemberCount`.
+
+### Tests
+
+- `liveMemberCount — reflects live edges, not the at-insert snapshot (row 5.1.4.3)` — inserts a 3-member cluster, tombstones 2 members, asserts metadata.memberCount stays 3 while liveMemberCount returns 1.
+- `liveMemberCount — returns 0 for unknown clusterId`.
+- 41/41 tests pass (39 prior + 2 new).
+
 ## [0.2.0] — 2026-05-17
 
 Additive — `computeClusters` now guarantees output determinism regardless of input element / dependency ordering. Closes Fathom row 5.0.7 (`louvain-l3-non-determinism`).

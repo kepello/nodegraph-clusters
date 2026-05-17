@@ -114,4 +114,17 @@ export interface ClusterOverlay {
    * targetRef for unresolved (dangling) ones.
    */
   membersOf(clusterId: string): Edge[];
+
+  /**
+   * Current live-member count derived from `groups` edges. Closes
+   * Fathom row 5.1.4.3: cluster metadata's `memberCount` is set at
+   * insert time and goes stale as member elements are tombstoned by
+   * downstream analyzer runs (substrate's `tombstoneNode` cascade
+   * also tombstones incoming edges, including this cluster's
+   * `groups` edges to that element). Consumers wanting the *current*
+   * count must read this instead of `metadata.memberCount`.
+   *
+   * Returns 0 when the cluster doesn't exist or has no live members.
+   */
+  liveMemberCount(clusterId: string): number;
 }

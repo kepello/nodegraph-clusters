@@ -213,6 +213,10 @@ export class ClusterOverlayImpl implements ClusterOverlay {
       includeDangling: true,
     });
   }
+
+  liveMemberCount(clusterId: string): number {
+    return this.membersOf(clusterId).length;
+  }
 }
 
 function buildMetadata(input: ClusterInput): ClusterMetadata {

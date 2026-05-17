@@ -204,3 +204,64 @@ test("getCluster — returns the cluster by id, undefined for unknown", () => {
 test("CLUSTER_DOMAIN — domain is the substrate identifier", () => {
   assert.equal(CLUSTER_DOMAIN, "cluster");
 });
+
+test("liveMemberCount — reflects live edges, not the at-insert snapshot (row 5.1.4.3)", () => {
+  // Regression for Fathom 5.1.4.3: `metadata.memberCount` is set at
+  // insert time and stays at that value even after member elements
+  // get tombstoned (substrate's `tombstoneNode` cascade also
+  // tombstones incoming edges). On a real workspace this drifts a
+  // cluster's reported memberCount from its actual live-edge set
+  // (Fathom self-analysis: cluster `43a96f6237e737ea` showed
+  // metadata.memberCount=132 but only 1 live `groups` edge).
+  // `liveMemberCount` must read from edges, not metadata.
+  const graph = makeGraph();
+  const overlay = makeClusterOverlay(graph);
+
+  // Insert three member element nodes so the groups edges are
+  // resolved (live tombstone cascade requires resolved targetIds).
+  graph.transaction(
+    { kind: "test-elements", producerDomain: "analysis", summary: "test setup" },
+    () => {
+      graph.insertNode({ domain: "analysis", naturalKey: "m1", contentHash: "h-m1" });
+      graph.insertNode({ domain: "analysis", naturalKey: "m2", contentHash: "h-m2" });
+      graph.insertNode({ domain: "analysis", naturalKey: "m3", contentHash: "h-m3" });
+    },
+  );
+  const m1 = graph.getLiveNodeByNaturalKey("analysis", "m1")!;
+  const m2 = graph.getLiveNodeByNaturalKey("analysis", "m2")!;
+  const m3 = graph.getLiveNodeByNaturalKey("analysis", "m3")!;
+
+  overlay.insertCluster({
+    clusterId: "cluster-x",
+    name: "cluster-x",
+    memberCount: 3,
+    contentHash: "ch_x",
+    memberElementIds: [m1.id, m2.id, m3.id],
+  });
+
+  // Before tombstone: both views agree.
+  assert.equal(overlay.getCluster("cluster-x")!.metadata.memberCount, 3);
+  assert.equal(overlay.liveMemberCount("cluster-x"), 3);
+
+  // Tombstone two member elements. The cluster overlay does NOT
+  // observe these — its metadata.memberCount stays at 3.
+  graph.transaction(
+    { kind: "test-tombstones", producerDomain: "analysis", summary: "drop members" },
+    () => {
+      graph.tombstoneNode(m1.id);
+      graph.tombstoneNode(m2.id);
+    },
+  );
+
+  // metadata.memberCount stays stale at 3 (this is the documented
+  // snapshot behavior — preserved for callers that want it).
+  assert.equal(overlay.getCluster("cluster-x")!.metadata.memberCount, 3);
+  // liveMemberCount reflects reality: 1 member still live.
+  assert.equal(overlay.liveMemberCount("cluster-x"), 1);
+});
+
+test("liveMemberCount — returns 0 for unknown clusterId", () => {
+  const graph = makeGraph();
+  const overlay = makeClusterOverlay(graph);
+  assert.equal(overlay.liveMemberCount("does-not-exist"), 0);
+});
