@@ -201,7 +201,11 @@ test("computeClusters — dependsOn captures inter-cluster aggregate edge counts
   assert.ok(cCluster);
   assert.equal(aCluster.dependsOn.length, 1);
   assert.equal(aCluster.dependsOn[0].targetClusterId, cCluster.clusterId);
-  assert.equal(aCluster.dependsOn[0].edgeCount, 2);
+  // Fathom row 5.0.28 (d): test fixture has one edge with weight=2.
+  // rawEdgeCount counts distinct edges (1); weightedEdgeCount sums
+  // weights (2).
+  assert.equal(aCluster.dependsOn[0].rawEdgeCount, 1);
+  assert.equal(aCluster.dependsOn[0].weightedEdgeCount, 2);
 });
 
 test("computeClusters — confidenceScore reflects intra-cluster cohesion", () => {

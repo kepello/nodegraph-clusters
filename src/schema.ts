@@ -72,7 +72,7 @@ export const CLUSTER_METADATA_SCHEMA: MetadataSchema = {
       type: "array",
       title: "Cluster-to-cluster aggregate dependencies",
       description:
-        "Per-target aggregate counts of element-level dependency edges that cross cluster boundaries. Edge-type weighting NOT applied in v1 — all edge types contribute equally. Each entry: `{ targetClusterId: string, edgeCount: number }`.",
+        "Per-target aggregate counts of element-level dependency edges that cross cluster boundaries. Each entry: `{ targetClusterId: string, rawEdgeCount: number, weightedEdgeCount: number }`. Fathom 5.0.28 (d) split: `rawEdgeCount` is integer count of distinct contributing edges; `weightedEdgeCount` is the sum of per-edge weights (fractional when edge-type weighting is in play per row 5.0.14).",
     },
   },
 };

@@ -2,6 +2,27 @@
 
 All notable changes to `@kepello/nodegraph-clusters`. Format follows [Keep a Changelog](https://keepachangelog.com/).
 
+## [0.5.0] — 2026-05-18
+
+Breaking — `ClusterDependency` field rename: `edgeCount` → split into `rawEdgeCount` + `weightedEdgeCount`. Closes Fathom row 5.0.28 (d).
+
+### Changed
+
+- **Breaking**: `ClusterDependency` interface now exposes two fields instead of one:
+  - `rawEdgeCount: number` — integer count of distinct contributing element-level edges crossing the cluster boundary.
+  - `weightedEdgeCount: number` — sum of per-edge weights (may be fractional when edge-type weighting is in play per Fathom row 5.0.14's caller-side weights).
+- `computeClusters` tracks both counts independently. Pre-prod no migration path; consumers must read the new field names.
+- Schema description updated to reflect the dual-field shape.
+
+### Why
+
+Round-5 pilot F14 surfaced `cluster_dependencies.edgeCount` returning fractional values like `15.400000000000007` — a leak of internal weight-sum semantics through a field named "count." Splitting clarifies the two distinct signals (count vs weighted-sum) so consumers can pick the one they want.
+
+### Tests
+
+- Updated existing test to assert both `rawEdgeCount` + `weightedEdgeCount`.
+- 44/44 tests pass.
+
 ## [0.4.0] — 2026-05-18
 
 Bug fix — `ClusterOverlay.insertCluster` now reconciles `groups` edges against `input.memberElementIds` instead of doing additive emit-if-not-present dedup. Closes Fathom row 5.0.22 (`ghost-cluster-substrate-integrity`).

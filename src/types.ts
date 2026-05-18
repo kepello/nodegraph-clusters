@@ -12,10 +12,22 @@ import { CLUSTER_METADATA_KIND } from "./schema.js";
 /**
  * Per-cluster aggregate dependency to another cluster. Computed from
  * the underlying element-level edges that cross cluster boundaries.
+ *
+ * Fathom row 5.0.28 (d): split into `rawEdgeCount` (integer count
+ * of distinct contributing edges) + `weightedEdgeCount` (sum of
+ * per-edge weights, often fractional after edge-type weighting
+ * introduced in row 5.0.14). The legacy `edgeCount` field is
+ * removed — consumers must read the new names. Round-5 pilot F14
+ * surfaced fractional values like `15.400000000000007` leaking
+ * through a field named "edgeCount"; explicit weighted-vs-raw split
+ * resolves the ambiguity.
  */
 export interface ClusterDependency {
   targetClusterId: string;
-  edgeCount: number;
+  /** Count of distinct element-level edges crossing the cluster boundary (integer). */
+  rawEdgeCount: number;
+  /** Sum of per-edge weights (may be fractional after edge-type weighting). */
+  weightedEdgeCount: number;
 }
 
 /**
