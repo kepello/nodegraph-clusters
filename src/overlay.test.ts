@@ -260,6 +260,157 @@ test("liveMemberCount — reflects live edges, not the at-insert snapshot (row 5
   assert.equal(overlay.liveMemberCount("cluster-x"), 1);
 });
 
+test("insertCluster — re-emits groups edges after element supersede (Fathom 5.0.22)", () => {
+  // Regression for Fathom row 5.0.22: prior code deduped existing
+  // edges by targetId, so when a member element superseded (new UUID,
+  // same naturalKey) the dedup check missed the new UUID and emitted
+  // a fresh edge — without tombstoning the stale edge pointing at the
+  // now-superseded element. Both edges stayed live, inflating
+  // `liveMemberCount` beyond `input.memberElementIds.length`.
+  // Reconciliation tombstones the stale edge.
+  const graph = makeGraph();
+  const overlay = makeClusterOverlay(graph);
+
+  graph.transaction(
+    { kind: "test-elements", producerDomain: "analysis", summary: "init" },
+    () => {
+      graph.insertNode({ domain: "analysis", naturalKey: "elem1", contentHash: "h-e1-v1" });
+      graph.insertNode({ domain: "analysis", naturalKey: "elem2", contentHash: "h-e2-v1" });
+    },
+  );
+  const e1 = graph.getLiveNodeByNaturalKey("analysis", "elem1")!;
+  const e2 = graph.getLiveNodeByNaturalKey("analysis", "elem2")!;
+
+  overlay.insertCluster({
+    clusterId: "C1",
+    name: "cluster-c1",
+    memberCount: 2,
+    contentHash: "ch-c1",
+    memberElementIds: [e1.id, e2.id],
+  });
+  assert.equal(overlay.liveMemberCount("C1"), 2);
+
+  graph.transaction(
+    { kind: "test-supersede", producerDomain: "analysis", summary: "update elem1" },
+    () => {
+      graph.supersedeNode(e1.id, { contentHash: "h-e1-v2" });
+    },
+  );
+  const e1Prime = graph.getLiveNodeByNaturalKey("analysis", "elem1")!;
+  assert.notEqual(e1.id, e1Prime.id);
+
+  overlay.insertCluster({
+    clusterId: "C1",
+    name: "cluster-c1",
+    memberCount: 2,
+    contentHash: "ch-c1",
+    memberElementIds: [e1Prime.id, e2.id],
+  });
+
+  // Post-fix: exactly 2 live members. Pre-fix: 3 (stale e1 + new e1Prime + e2).
+  assert.equal(overlay.liveMemberCount("C1"), 2);
+
+  // And those 2 members must point at LIVE element nodes.
+  const clusterNode = graph.getLiveNodeByNaturalKey("cluster", "C1")!;
+  const liveTargetCount = graph
+    .edgesFrom(clusterNode.id, { type: GROUPS_EDGE_TYPE })
+    .filter((e) => e.targetId !== null)
+    .map((e) => graph.getNodeById(e.targetId!))
+    .filter((n) => n !== undefined && n.lifecycleState === "live")
+    .length;
+  assert.equal(liveTargetCount, 2);
+});
+
+test("insertCluster — drops members no longer in input (drift-down)", () => {
+  // Regression: cluster member set shrinks across re-clusters (member
+  // left the Louvain community); old edges to removed members must
+  // tombstone, not linger.
+  const graph = makeGraph();
+  const overlay = makeClusterOverlay(graph);
+
+  graph.transaction(
+    { kind: "test-elements", producerDomain: "analysis", summary: "init" },
+    () => {
+      graph.insertNode({ domain: "analysis", naturalKey: "m1", contentHash: "h1" });
+      graph.insertNode({ domain: "analysis", naturalKey: "m2", contentHash: "h2" });
+      graph.insertNode({ domain: "analysis", naturalKey: "m3", contentHash: "h3" });
+    },
+  );
+  const m1 = graph.getLiveNodeByNaturalKey("analysis", "m1")!;
+  const m2 = graph.getLiveNodeByNaturalKey("analysis", "m2")!;
+  const m3 = graph.getLiveNodeByNaturalKey("analysis", "m3")!;
+
+  overlay.insertCluster({
+    clusterId: "CD",
+    name: "cluster-cd",
+    memberCount: 3,
+    contentHash: "ch-cd-v1",
+    memberElementIds: [m1.id, m2.id, m3.id],
+  });
+  assert.equal(overlay.liveMemberCount("CD"), 3);
+
+  // Re-cluster with only m1; m2/m3 left the community. Different
+  // contentHash would normally trigger supersede + edge re-emit, but
+  // an explicit drift-down with same-hash should still reconcile.
+  overlay.insertCluster({
+    clusterId: "CD",
+    name: "cluster-cd",
+    memberCount: 1,
+    contentHash: "ch-cd-v1",
+    memberElementIds: [m1.id],
+  });
+  assert.equal(overlay.liveMemberCount("CD"), 1);
+});
+
+test("insertCluster — re-emits after tombstone cascade (Fathom 5.0.22 ghost variant)", () => {
+  // Regression: when a member element tombstones, the substrate
+  // cascade tombstones the cluster's outgoing groups edge to it
+  // (incoming-to-target cascade). A subsequent insertCluster call
+  // must re-emit fresh edges for the surviving members — the prior
+  // code's `existingTargets` dedup was correct in this branch (the
+  // cascaded edges aren't in `edgesFrom`'s live-only result), but
+  // pinning the invariant here protects against future regressions.
+  const graph = makeGraph();
+  const overlay = makeClusterOverlay(graph);
+
+  graph.transaction(
+    { kind: "test-elements", producerDomain: "analysis", summary: "init" },
+    () => {
+      graph.insertNode({ domain: "analysis", naturalKey: "e1", contentHash: "h1" });
+      graph.insertNode({ domain: "analysis", naturalKey: "e2", contentHash: "h2" });
+    },
+  );
+  const e1 = graph.getLiveNodeByNaturalKey("analysis", "e1")!;
+  const e2 = graph.getLiveNodeByNaturalKey("analysis", "e2")!;
+
+  overlay.insertCluster({
+    clusterId: "CG",
+    name: "cluster-cg",
+    memberCount: 2,
+    contentHash: "ch-cg",
+    memberElementIds: [e1.id, e2.id],
+  });
+
+  graph.transaction(
+    { kind: "test-tombstone", producerDomain: "analysis", summary: "drop e1" },
+    () => {
+      graph.tombstoneNode(e1.id);
+    },
+  );
+  // Cascade has tombstoned the cluster→e1 edge.
+  assert.equal(overlay.liveMemberCount("CG"), 1);
+
+  // Re-call insertCluster with surviving member only.
+  overlay.insertCluster({
+    clusterId: "CG",
+    name: "cluster-cg",
+    memberCount: 1,
+    contentHash: "ch-cg",
+    memberElementIds: [e2.id],
+  });
+  assert.equal(overlay.liveMemberCount("CG"), 1);
+});
+
 test("liveMemberCount — returns 0 for unknown clusterId", () => {
   const graph = makeGraph();
   const overlay = makeClusterOverlay(graph);

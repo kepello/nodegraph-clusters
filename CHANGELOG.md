@@ -2,6 +2,34 @@
 
 All notable changes to `@kepello/nodegraph-clusters`. Format follows [Keep a Changelog](https://keepachangelog.com/).
 
+## [0.4.0] — 2026-05-18
+
+Bug fix — `ClusterOverlay.insertCluster` now reconciles `groups` edges against `input.memberElementIds` instead of doing additive emit-if-not-present dedup. Closes Fathom row 5.0.22 (`ghost-cluster-substrate-integrity`).
+
+### Changed
+
+- `insertCluster` walks the cluster's existing live `groups` edges and tombstones any whose target is (a) not in the desired member set, or (b) a non-live node (e.g. previously-superseded element). Then emits fresh edges for any desired member not already represented. Post-call invariant: live `groups` edges from the cluster exactly mirror `input.memberElementIds`.
+
+### Why
+
+Prior code deduped existing edges by `targetId`, then emitted any `input.memberElementIds[i]` not in that set. Two failure modes:
+
+1. **Stale edges on element supersede.** When a member element superseded (new UUID, same naturalKey), the new UUID wasn't in `existingTargets` (which held the old UUID) → fresh edge emitted, but the stale edge pointing at the now-superseded element stayed live. Live edge count inflated beyond `input.memberElementIds.length`. Round-5 pilot saw 6 clusters in the top-50 with `memberCount > originalMemberCount` (`ceb6d698284655e8`, `8524a8e106bd076e`, `2c443cb6126e7fa6`, `01c0178249a71679`, `527f887f3a4a0a64`, `a6522c196dbefff9`).
+2. **Lingering edges on drift-down.** When the cluster's member set shrank across re-clusters (e.g. a member left the Louvain community) with the same `contentHash`, dropped members' edges were never tombstoned because the dedup loop only walked the input side, not the existing side.
+
+Reconciliation pattern matches `nodegraph-capability-units`' entry-edge handling. Substrate `tombstoneEdge` was the surgical tool — no substrate-side change needed.
+
+### Tests
+
+- `insertCluster — re-emits groups edges after element supersede (Fathom 5.0.22)` — inserts cluster + 2 members, supersedes one (new UUID), re-calls insertCluster with [newUUID, e2.id]. Asserts `liveMemberCount === 2` and both edges point at live element nodes. Pre-fix would report 3.
+- `insertCluster — drops members no longer in input (drift-down)` — inserts cluster + 3 members, re-calls with [m1] only. Asserts `liveMemberCount === 1`. Pre-fix would report 3.
+- `insertCluster — re-emits after tombstone cascade (Fathom 5.0.22 ghost variant)` — pins the invariant for the post-tombstone-cascade re-cluster case (this case worked pre-fix; pinning prevents regression).
+- 44/44 tests pass (41 prior + 3 new).
+
+### Migration
+
+Pre-0.4.0 graphs may carry stale `groups` edges (inflated cluster membership) or orphaned cluster nodes (0 live members, called "ghost clusters" by Round-5 F1). Rebuild `.fathom/graph.db` after install for a clean state.
+
 ## [0.3.0] — 2026-05-17
 
 Additive — `ClusterOverlay.liveMemberCount(clusterId)` returns the current member count derived from live `groups` edges, distinct from `metadata.memberCount` (the at-insert-time snapshot). Closes Fathom row 5.1.4.3 (`mcp-cluster-members-inconsistency`).

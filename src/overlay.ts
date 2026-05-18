@@ -83,20 +83,35 @@ export class ClusterOverlayImpl implements ClusterOverlay {
       });
     }
 
-    // Write `groups` edges for each member. Deduplicate against any
-    // edges that already exist (substrate's live-unique index enforces
-    // this at write time, but checking first avoids transaction churn).
+    // Reconcile `groups` edges to exactly mirror `input.memberElementIds`.
+    // Per Fathom row 5.0.22: the prior additive emit-if-not-present
+    // logic deduped by targetId, which left stale edges whenever a
+    // member element was superseded (old UUID stayed as a live edge
+    // target alongside the new UUID — both edges live, inflating live
+    // member count) or when the cluster's member set shifted without a
+    // contentHash change (dropped members lingered). Reconciliation
+    // pattern mirrors capability-units' entry-edge handling.
+    const desiredMemberIds = new Set(input.memberElementIds);
     const existingEdges = this.graph.edgesFrom(clusterNode.id, {
       type: GROUPS_EDGE_TYPE,
       includeDangling: true,
     });
-    const existingTargets = new Set<string>();
+    const presentTargets = new Set<string>();
     for (const e of existingEdges) {
-      if (e.targetId !== null) existingTargets.add(e.targetId);
-      if (e.targetRef !== null) existingTargets.add(e.targetRef);
+      const key = e.targetId ?? e.targetRef;
+      if (key === null) continue;
+      const targetIsNonLive =
+        e.targetId !== null &&
+        this.graph.getNodeById(e.targetId)?.lifecycleState !== "live";
+      const notInDesired = !desiredMemberIds.has(key);
+      if (targetIsNonLive || notInDesired) {
+        this.graph.tombstoneEdge(e.id);
+      } else {
+        presentTargets.add(key);
+      }
     }
     for (const memberId of input.memberElementIds) {
-      if (existingTargets.has(memberId)) continue;
+      if (presentTargets.has(memberId)) continue;
       const byId = this.graph.getNodeById(memberId);
       if (byId !== undefined) {
         this.graph.insertEdge({
