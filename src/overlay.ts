@@ -9,7 +9,7 @@
  * and resolved lazily by the substrate's dangling-edge mechanism).
  */
 
-import type { Edge, GraphLayer, Node } from "@kepello/nodegraph-core";
+import type { Edge, GraphLayer, GraphMutator, Node } from "@kepello/nodegraph-core";
 import {
   CLUSTER_DOMAIN,
   CLUSTER_INDEXES,
@@ -27,23 +27,17 @@ import type {
 export const GROUPS_EDGE_TYPE = "groups";
 
 export class ClusterOverlayImpl implements ClusterOverlay {
+  private readonly mutator: GraphMutator<typeof CLUSTER_DOMAIN>;
+
   constructor(private readonly graph: GraphLayer) {
-    try {
-      this.graph.registerOverlay({
-        domain: CLUSTER_DOMAIN,
-        metadataSchema: CLUSTER_METADATA_SCHEMA,
-        indexes: CLUSTER_INDEXES,
-      });
-    } catch (err) {
-      // Tolerate re-registration on a long-lived graph that already
-      // carries the domain (same pattern as the analysis overlay).
-      if (
-        !(err instanceof Error) ||
-        !err.message.includes("already registered for domain")
-      ) {
-        throw err;
-      }
-    }
+    // Per Fathom row 5.0.42: registerOverlay returns the domain-scoped
+    // mutator; this overlay holds it for all substrate writes. Reads
+    // continue via `this.graph` (GraphReader surface).
+    this.mutator = this.graph.registerOverlay({
+      domain: CLUSTER_DOMAIN,
+      metadataSchema: CLUSTER_METADATA_SCHEMA,
+      indexes: CLUSTER_INDEXES,
+    });
   }
 
   insertCluster(input: ClusterInput): ClusterNode {
@@ -93,7 +87,7 @@ export class ClusterOverlayImpl implements ClusterOverlay {
     );
     let clusterNode: Node;
     if (existing === undefined) {
-      clusterNode = this.graph.insertNode({
+      clusterNode = this.mutator.insertNode({
         domain: CLUSTER_DOMAIN,
         naturalKey: input.clusterId,
         contentHash: input.contentHash,
@@ -105,7 +99,7 @@ export class ClusterOverlayImpl implements ClusterOverlay {
       clusterNode = existing;
     } else {
       // Content changed — supersede the prior tip.
-      clusterNode = this.graph.supersedeNode(existing.id, {
+      clusterNode = this.mutator.supersedeNode(existing.id, {
         contentHash: input.contentHash,
         metadata: metadata as unknown,
       });
@@ -146,7 +140,7 @@ export class ClusterOverlayImpl implements ClusterOverlay {
         this.graph.getNodeById(e.targetId)?.lifecycleState !== "live";
       const notInDesired = !desiredMemberIds.has(key);
       if (targetIsNonLive || notInDesired) {
-        this.graph.tombstoneEdge(e.id);
+        this.mutator.tombstoneEdge(e.id);
       } else {
         presentTargets.add(key);
       }
@@ -155,13 +149,13 @@ export class ClusterOverlayImpl implements ClusterOverlay {
       if (presentTargets.has(memberId)) continue;
       const byId = this.graph.getNodeById(memberId);
       if (byId !== undefined) {
-        this.graph.insertEdge({
+        this.mutator.insertEdge({
           sourceId: clusterNodeId,
           targetId: memberId,
           type: GROUPS_EDGE_TYPE,
         });
       } else {
-        this.graph.insertEdge({
+        this.mutator.insertEdge({
           sourceId: clusterNodeId,
           targetRef: memberId,
           type: GROUPS_EDGE_TYPE,
@@ -244,7 +238,7 @@ export class ClusterOverlayImpl implements ClusterOverlay {
       if (key !== null) memberTargets.push(key);
     }
     const next = transform(priorMetadata);
-    const node = this.graph.supersedeNode(existing.id, {
+    const node = this.mutator.supersedeNode(existing.id, {
       contentHash: existing.contentHash,
       metadata: next as unknown,
     });
@@ -265,7 +259,7 @@ export class ClusterOverlayImpl implements ClusterOverlay {
           clusterId,
         );
         if (existing === undefined) return;
-        this.graph.tombstoneNode(existing.id);
+        this.mutator.tombstoneNode(existing.id);
       },
     );
   }
