@@ -50,6 +50,31 @@ export interface ClusterMetadata {
   confidenceScore?: number;
   /** Per-target aggregate edge counts to other clusters. */
   dependsOn?: ClusterDependency[];
+  /**
+   * Canonical-member-set hash — content-hash over the sorted set of
+   * member naturalKeys. Stable across content changes (member
+   * naturalKeys don't shift when source files change; contentHashes
+   * do). Two clusters with the same `canonicalMemberSetHash` are
+   * "the same cluster" for enrichment-preservation purposes. Fathom
+   * row 5.0.31: enables `llmEnrichment` to lift forward across
+   * Louvain re-emissions.
+   *
+   * Optional for backward compatibility — when absent, no
+   * enrichment-preservation happens (current pre-5.0.31 behavior).
+   */
+  canonicalMemberSetHash?: string;
+  /**
+   * LLM-produced naming enrichment (Haiku-namer pipeline output).
+   * Persisted on the cluster's metadata; survives Louvain
+   * re-emissions when `canonicalMemberSetHash` matches a prior live
+   * cluster (Fathom row 5.0.31).
+   */
+  llmEnrichment?: {
+    name?: string;
+    displayName?: string;
+    summary?: string;
+    provenance?: { model?: string; generatedAt?: string };
+  };
 }
 
 /**
@@ -73,6 +98,26 @@ export interface ClusterInput {
    * (substrate stores as `targetRef` and resolves lazily).
    */
   memberElementIds: readonly string[];
+  /**
+   * Canonical-member-set hash — see ClusterMetadata. Caller-supplied;
+   * the cluster overlay does not compute it (it doesn't know the
+   * member naturalKeys, only their UUIDs). The runner (fathom-cli's
+   * `runAbstractions`) computes from sorted member naturalKeys.
+   * Fathom row 5.0.31.
+   */
+  canonicalMemberSetHash?: string;
+  /**
+   * Fresh LLM enrichment to write on this cluster. When omitted AND
+   * the cluster has a `canonicalMemberSetHash` matching a prior live
+   * cluster's, that prior cluster's `llmEnrichment` is lifted forward.
+   * When supplied, the input wins. Fathom row 5.0.31.
+   */
+  llmEnrichment?: {
+    name?: string;
+    displayName?: string;
+    summary?: string;
+    provenance?: { model?: string; generatedAt?: string };
+  };
 }
 
 /**

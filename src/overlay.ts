@@ -58,7 +58,35 @@ export class ClusterOverlayImpl implements ClusterOverlay {
   }
 
   private doInsertCluster(input: ClusterInput): ClusterNode {
-    const metadata = buildMetadata(input);
+    // Fathom row 5.0.31: when the input doesn't carry a fresh
+    // `llmEnrichment` AND has a `canonicalMemberSetHash`, look up any
+    // live cluster with the same canonical member set and lift its
+    // `llmEnrichment` forward. This survives Louvain re-emissions
+    // that produce fresh clusterIds (different contentHashes) for the
+    // same canonical membership.
+    let liftedEnrichment: ClusterInput["llmEnrichment"] | undefined;
+    if (
+      input.canonicalMemberSetHash !== undefined &&
+      input.llmEnrichment === undefined
+    ) {
+      const priors = this.graph.queryNodes({
+        domain: CLUSTER_DOMAIN,
+        lifecycleState: "live",
+        "metadata.canonicalMemberSetHash": input.canonicalMemberSetHash,
+      });
+      for (const p of priors) {
+        // Skip the cluster being inserted itself if it already exists
+        // by clusterId (shouldn't happen — we check `existing` below
+        // — but defensive).
+        const pMeta = p.metadata as { clusterId?: string; llmEnrichment?: ClusterInput["llmEnrichment"] };
+        if (pMeta.clusterId === input.clusterId) continue;
+        if (pMeta.llmEnrichment !== undefined) {
+          liftedEnrichment = pMeta.llmEnrichment;
+          break;
+        }
+      }
+    }
+    const metadata = buildMetadata(input, liftedEnrichment);
     const existing = this.graph.getLiveNodeByNaturalKey(
       CLUSTER_DOMAIN,
       input.clusterId,
@@ -234,7 +262,10 @@ export class ClusterOverlayImpl implements ClusterOverlay {
   }
 }
 
-function buildMetadata(input: ClusterInput): ClusterMetadata {
+function buildMetadata(
+  input: ClusterInput,
+  liftedEnrichment?: ClusterInput["llmEnrichment"],
+): ClusterMetadata {
   const meta: ClusterMetadata = {
     kind: CLUSTER_METADATA_KIND,
     clusterId: input.clusterId,
@@ -248,6 +279,15 @@ function buildMetadata(input: ClusterInput): ClusterMetadata {
   }
   if (input.dependsOn !== undefined && input.dependsOn.length > 0) {
     meta.dependsOn = [...input.dependsOn];
+  }
+  if (input.canonicalMemberSetHash !== undefined) {
+    meta.canonicalMemberSetHash = input.canonicalMemberSetHash;
+  }
+  // Fathom row 5.0.31: fresh input wins; lifted-forward fills in when
+  // input is absent.
+  const enrichment = input.llmEnrichment ?? liftedEnrichment;
+  if (enrichment !== undefined) {
+    meta.llmEnrichment = { ...enrichment };
   }
   return meta;
 }

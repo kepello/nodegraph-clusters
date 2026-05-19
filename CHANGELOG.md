@@ -2,6 +2,34 @@
 
 All notable changes to `@kepello/nodegraph-clusters`. Format follows [Keep a Changelog](https://keepachangelog.com/).
 
+## [0.6.0] — 2026-05-19
+
+Adds — `ClusterInput.canonicalMemberSetHash` + `llmEnrichment` for enrichment-preservation across Louvain re-emissions. Closes Fathom row 5.0.31. TDD-driven (test pinned the invariant before the fix landed).
+
+### Added
+
+- `ClusterInput.canonicalMemberSetHash?: string` — caller-supplied content-hash over sorted member naturalKeys (stable across content changes). The cluster overlay does NOT compute it (it doesn't know member naturalKeys, only their UUIDs); the runner is responsible.
+- `ClusterInput.llmEnrichment?: { name?, displayName?, summary?, provenance? }` — fresh enrichment supplied directly. Wins over lifted-forward enrichment.
+- `ClusterMetadata.canonicalMemberSetHash` + `ClusterMetadata.llmEnrichment` — persisted on every cluster node carrying either.
+- New `clusters_by_canonicalMemberSetHash` index for lookups.
+- **Enrichment preservation**: when `insertCluster` runs WITHOUT `input.llmEnrichment` AND WITH `input.canonicalMemberSetHash`, it queries for any live cluster sharing the same canonical member set; if found AND it carries an `llmEnrichment`, that enrichment lifts forward onto the new cluster. Round-6 F1 surfaced this as the headline user-visible regression: Haiku-produced names persist to clusterIds that the 5.0.7.1 tombstone-stale pass clears across re-analyzes; canonical-member-set keying lifts them forward.
+
+### Why
+
+Round-6 pilot F1 (HIGH): `code.bounded_contexts` returned zero rows with `llmName` despite a Haiku-namer run earlier in the session. Root cause: Louvain re-emissions are content-hash-derived; member contentHashes shift across runs, producing fresh clusterIds. The prior Haiku enrichment is attached to clusterIds the new emission doesn't produce. The fix: keep an orthogonal "canonical member set" identity (member naturalKeys, stable across content changes) and lift enrichment forward when it matches.
+
+### Tests
+
+- 3 new regression tests pinning the preservation invariant:
+  - "preserves llmEnrichment across re-clustering with same canonical member set"
+  - "input llmEnrichment wins over lifted-forward when both present"
+  - "does NOT lift forward when canonical member set differs"
+- 47/47 tests pass.
+
+### Compat note
+
+Both new `ClusterInput` fields are optional for test-fixture ergonomics. Tracked for removal as Fathom row 5.0.31.1 — trigger: after the production runner reliably populates `canonicalMemberSetHash`.
+
 ## [0.5.0] — 2026-05-18
 
 Breaking — `ClusterDependency` field rename: `edgeCount` → split into `rawEdgeCount` + `weightedEdgeCount`. Closes Fathom row 5.0.28 (d).

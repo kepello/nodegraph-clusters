@@ -102,4 +102,19 @@ export const CLUSTER_INDEXES: IndexSpec[] = [
       nonNull: ["metadata.language"],
     },
   },
+  // Fathom row 5.0.31: enrichment-preservation lookup index. Used by
+  // `insertCluster` to find the prior live cluster (if any) with the
+  // same canonical member set, so its `llmEnrichment` can lift forward
+  // onto the new cluster. NOT unique — Louvain re-emissions may
+  // briefly have two clusters with the same canonical member set live
+  // before the tombstone-stale pass clears the old one.
+  {
+    name: "clusters_by_canonicalMemberSetHash",
+    fields: ["metadata.canonicalMemberSetHash"],
+    scope: {
+      domain: CLUSTER_DOMAIN,
+      lifecycleState: "live",
+      nonNull: ["metadata.canonicalMemberSetHash"],
+    },
+  },
 ];
