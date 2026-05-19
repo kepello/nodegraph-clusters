@@ -126,6 +126,80 @@ test("renameCluster — updates displayName, preserves clusterId", () => {
   assert.equal(renamed.metadata.name, "cluster-auto");
 });
 
+test("renameCluster — PRESERVES groups edges through supersede (Fathom 5.0.39)", () => {
+  // Round-7 follow-up. The bug: `renameCluster` calls
+  // `graph.supersedeNode` to update displayName, which CASCADES the
+  // prior node's outgoing live edges to tombstoned (per the substrate
+  // conformance test). The current implementation does NOT re-emit
+  // groups edges from the new node — so the renamed cluster loses its
+  // membership entirely.
+  //
+  // Invariant: after any overlay-method-driven supersede of a cluster
+  // node, liveMemberCount MUST equal the cluster's memberCount. The
+  // overlay owns the groups-edge invariant; its OWN methods MUST
+  // honor it.
+  const graph = makeGraph();
+  const overlay = makeClusterOverlay(graph);
+  overlay.insertCluster({
+    clusterId: "preserve-me",
+    name: "cluster-x",
+    memberCount: 3,
+    contentHash: "h1",
+    memberElementIds: ["m1", "m2", "m3"],
+  });
+  assert.equal(overlay.liveMemberCount("preserve-me"), 3);
+  overlay.renameCluster("preserve-me", "Renamed");
+  assert.equal(
+    overlay.liveMemberCount("preserve-me"),
+    3,
+    "renameCluster lost groups edges — bug introduced by raw supersedeNode without edge reconciliation",
+  );
+});
+
+test("setEnrichment — preserves groups edges and writes llmEnrichment (Fathom 5.0.39)", () => {
+  // The new overlay method to be added by 5.0.39's fix. Currently the
+  // Haiku-namer script bypasses the overlay and calls
+  // `graph.supersedeNode` directly to write `llmEnrichment` onto the
+  // cluster's metadata. That bypass tombstones the cluster's groups
+  // edges (substrate cascade) without re-emitting them, breaking
+  // cluster_summary + layering_violations on every enriched cluster.
+  //
+  // The fix: `setEnrichment(clusterId, llmEnrichment)` on the
+  // overlay. Wraps supersedeNode + reconciles groups edges in one
+  // transaction.
+  const graph = makeGraph();
+  const overlay = makeClusterOverlay(graph);
+  overlay.insertCluster({
+    clusterId: "to-enrich",
+    name: "cluster-y",
+    memberCount: 4,
+    contentHash: "h1",
+    memberElementIds: ["m1", "m2", "m3", "m4"],
+  });
+  // This method does not yet exist — test will fail with TypeError
+  // until 5.0.39 ships the method.
+  const o = overlay as unknown as {
+    setEnrichment(
+      clusterId: string,
+      enrichment: { name: string; displayName?: string; summary?: string },
+    ): unknown;
+  };
+  o.setEnrichment("to-enrich", {
+    name: "my-bc",
+    displayName: "My Bounded Context",
+    summary: "A test enrichment.",
+  });
+  assert.equal(
+    overlay.liveMemberCount("to-enrich"),
+    4,
+    "setEnrichment lost groups edges — same class of bug as renameCluster",
+  );
+  const cluster = overlay.getCluster("to-enrich");
+  const enriched = cluster?.metadata.llmEnrichment;
+  assert.equal(enriched?.name, "my-bc");
+  assert.equal(enriched?.displayName, "My Bounded Context");
+});
+
 test("renameCluster — throws on unknown clusterId", () => {
   const graph = makeGraph();
   const overlay = makeClusterOverlay(graph);
