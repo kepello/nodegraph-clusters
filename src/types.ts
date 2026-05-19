@@ -147,6 +147,17 @@ export interface ClusterOverlay {
    */
   renameCluster(clusterId: string, displayName: string): ClusterNode;
 
+  /**
+   * Write `llmEnrichment` onto a cluster's metadata without changing
+   * identity. Per Fathom row 5.0.39: this is the ONLY correct path to
+   * persist LLM enrichment — calling `graph.supersedeNode` directly
+   * tombstones the cluster's `groups` edges and breaks membership.
+   */
+  setEnrichment(
+    clusterId: string,
+    enrichment: ClusterMetadata["llmEnrichment"],
+  ): ClusterNode;
+
   /** Tombstone (logically delete) a cluster node. */
   tombstoneCluster(clusterId: string): void;
 

@@ -111,16 +111,29 @@ export class ClusterOverlayImpl implements ClusterOverlay {
       });
     }
 
-    // Reconcile `groups` edges to exactly mirror `input.memberElementIds`.
-    // Per Fathom row 5.0.22: the prior additive emit-if-not-present
-    // logic deduped by targetId, which left stale edges whenever a
-    // member element was superseded (old UUID stayed as a live edge
-    // target alongside the new UUID — both edges live, inflating live
-    // member count) or when the cluster's member set shifted without a
-    // contentHash change (dropped members lingered). Reconciliation
-    // pattern mirrors capability-units' entry-edge handling.
-    const desiredMemberIds = new Set(input.memberElementIds);
-    const existingEdges = this.graph.edgesFrom(clusterNode.id, {
+    this.reconcileGroupsEdges(clusterNode.id, input.memberElementIds);
+    return asCluster(clusterNode);
+  }
+
+  /**
+   * Reconcile a cluster node's outgoing `groups` edges to mirror
+   * `desiredMemberElementIds` exactly. Tombstones edges whose target
+   * is non-live or not in the desired set; emits fresh edges for any
+   * desired member not already represented.
+   *
+   * Per Fathom row 5.0.22 (initial reconciliation) and 5.0.39
+   * (extracted into a shared helper so `renameCluster` + `setEnrichment`
+   * can both call it after `supersedeNode`). Calling raw `supersedeNode`
+   * on a cluster node cascades the prior tip's outgoing edges to
+   * tombstoned — every method that supersedes the cluster node MUST
+   * call this helper afterwards to re-establish membership.
+   */
+  private reconcileGroupsEdges(
+    clusterNodeId: string,
+    desiredMemberElementIds: readonly string[],
+  ): void {
+    const desiredMemberIds = new Set(desiredMemberElementIds);
+    const existingEdges = this.graph.edgesFrom(clusterNodeId, {
       type: GROUPS_EDGE_TYPE,
       includeDangling: true,
     });
@@ -138,25 +151,23 @@ export class ClusterOverlayImpl implements ClusterOverlay {
         presentTargets.add(key);
       }
     }
-    for (const memberId of input.memberElementIds) {
+    for (const memberId of desiredMemberElementIds) {
       if (presentTargets.has(memberId)) continue;
       const byId = this.graph.getNodeById(memberId);
       if (byId !== undefined) {
         this.graph.insertEdge({
-          sourceId: clusterNode.id,
+          sourceId: clusterNodeId,
           targetId: memberId,
           type: GROUPS_EDGE_TYPE,
         });
       } else {
         this.graph.insertEdge({
-          sourceId: clusterNode.id,
+          sourceId: clusterNodeId,
           targetRef: memberId,
           type: GROUPS_EDGE_TYPE,
         });
       }
     }
-
-    return asCluster(clusterNode);
   }
 
   renameCluster(clusterId: string, displayName: string): ClusterNode {
@@ -171,6 +182,44 @@ export class ClusterOverlayImpl implements ClusterOverlay {
   }
 
   private doRenameCluster(clusterId: string, displayName: string): ClusterNode {
+    return this.supersedeWithMetadata(clusterId, (prior) => ({
+      ...prior,
+      displayName,
+    }));
+  }
+
+  setEnrichment(
+    clusterId: string,
+    enrichment: ClusterMetadata["llmEnrichment"],
+  ): ClusterNode {
+    return this.graph.transaction(
+      {
+        kind: "set-cluster-enrichment",
+        producerDomain: CLUSTER_DOMAIN,
+        summary: `set llmEnrichment on cluster ${clusterId}`,
+      },
+      () =>
+        this.supersedeWithMetadata(clusterId, (prior) => ({
+          ...prior,
+          llmEnrichment: enrichment,
+        })),
+    ).result;
+  }
+
+  /**
+   * Shared supersede helper for cluster-metadata-only changes (rename,
+   * enrichment writes). Reads the existing live cluster, supersedes
+   * with the caller's transformed metadata, then re-reconciles
+   * `groups` edges from the new node UUID against the live member set
+   * recovered from the prior tip's outgoing edges. Per Fathom row
+   * 5.0.39 — raw `supersedeNode` cascades the prior tip's outgoing
+   * edges to tombstoned, so every metadata-only supersede MUST follow
+   * with edge re-reconciliation to preserve membership.
+   */
+  private supersedeWithMetadata(
+    clusterId: string,
+    transform: (prior: ClusterMetadata) => ClusterMetadata,
+  ): ClusterNode {
     const existing = this.graph.getLiveNodeByNaturalKey(
       CLUSTER_DOMAIN,
       clusterId,
@@ -182,14 +231,24 @@ export class ClusterOverlayImpl implements ClusterOverlay {
     if (priorMetadata === null) {
       throw new Error(`Cluster ${clusterId} has no metadata`);
     }
-    const next: ClusterMetadata = {
-      ...priorMetadata,
-      displayName,
-    };
+    // Read the prior tip's live group-edge targets BEFORE supersede.
+    // `supersedeNode` will cascade-tombstone them; we capture the
+    // member set now so the reconcile pass can re-emit identical edges
+    // from the new tip's UUID.
+    const memberTargets: string[] = [];
+    for (const e of this.graph.edgesFrom(existing.id, {
+      type: GROUPS_EDGE_TYPE,
+      includeDangling: true,
+    })) {
+      const key = e.targetId ?? e.targetRef;
+      if (key !== null) memberTargets.push(key);
+    }
+    const next = transform(priorMetadata);
     const node = this.graph.supersedeNode(existing.id, {
       contentHash: existing.contentHash,
       metadata: next as unknown,
     });
+    this.reconcileGroupsEdges(node.id, memberTargets);
     return asCluster(node);
   }
 

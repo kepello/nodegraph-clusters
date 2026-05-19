@@ -2,6 +2,27 @@
 
 All notable changes to `@kepello/nodegraph-clusters`. Format follows [Keep a Changelog](https://keepachangelog.com/).
 
+## [0.7.0] — 2026-05-19
+
+Adds — `ClusterOverlay.setEnrichment(clusterId, llmEnrichment)` as the canonical persistence path for LLM enrichment. Fixes latent bug in `renameCluster`. Closes Fathom row 5.0.39 (cluster half). TDD-driven.
+
+### Added
+
+- **`setEnrichment(clusterId, llmEnrichment)`** — writes `metadata.llmEnrichment` and re-reconciles `groups` edges through a private `supersedeWithMetadata` helper. The ONLY correct path to persist LLM enrichment; calling `graph.supersedeNode` directly cascades the cluster's `groups` edges to tombstoned and breaks membership.
+
+### Fixed
+
+- **`renameCluster` no longer strips groups edges**. Prior implementation called `graph.supersedeNode` directly, relying on the substrate cascade — which tombstones outgoing live edges. Now routes through the same `supersedeWithMetadata` helper as `setEnrichment`: captures the prior tip's member-edge targets before supersede, then re-emits them from the new tip via `reconcileGroupsEdges`. Latent bug pre-fix; no production caller was hitting it, but any operator-rename UI would have triggered the cluster-membership wipe.
+
+### Internal
+
+- Extracted `reconcileGroupsEdges(clusterNodeId, desiredMemberElementIds)` from `insertCluster`. Now also called by `supersedeWithMetadata` (renameCluster + setEnrichment) so every metadata-only supersede preserves membership.
+
+### Tests
+
+- 2 new regression tests: `renameCluster — PRESERVES groups edges through supersede (Fathom 5.0.39)` + `setEnrichment — preserves groups edges and writes llmEnrichment (Fathom 5.0.39)`. Both RED pre-fix, GREEN post-fix.
+- 49/49 tests pass.
+
 ## [0.6.0] — 2026-05-19
 
 Adds — `ClusterInput.canonicalMemberSetHash` + `llmEnrichment` for enrichment-preservation across Louvain re-emissions. Closes Fathom row 5.0.31. TDD-driven (test pinned the invariant before the fix landed).
