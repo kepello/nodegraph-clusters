@@ -2,6 +2,19 @@
 
 All notable changes to `@kepello/nodegraph-clusters`. Format follows [Keep a Changelog](https://keepachangelog.com/).
 
+## [0.9.0] — 2026-05-25
+
+Batch UUID→Node hydration in `reconcileGroupsEdges` + `clusterForElement`. Part of Fathom row `perf-getbyid-consumer-migrations` (5.0.1.2.3.1). Peer-bump `@kepello/nodegraph-core` `^2.2.0` → `^2.3.0`. No behavior change.
+
+### Changed
+
+- `reconcileGroupsEdges`: two IN-clause queries (one for existing-edge targets to check liveness, one for desired-member ids to choose targetId-vs-targetRef branch). Pre-fix did one SQL per existing edge + one per desired member.
+- `clusterForElement`: per-edge `getNodeById` loop → one batch `getNodesByIds` + Map lookup.
+
+### Tests
+
+All existing tests pass; no behavior change.
+
 ## [0.7.0] — 2026-05-19
 
 Adds — `ClusterOverlay.setEnrichment(clusterId, llmEnrichment)` as the canonical persistence path for LLM enrichment. Fixes latent bug in `renameCluster`. Closes Fathom row 5.0.39 (cluster half). TDD-driven.

@@ -131,13 +131,20 @@ export class ClusterOverlayImpl implements ClusterOverlay {
       type: GROUPS_EDGE_TYPE,
       includeDangling: true,
     });
+    // Per Fathom row `perf-getbyid-consumer-migrations` (5.0.1.2.3.1):
+    // batch-hydrate the existing edges' targetIds AND the desired member
+    // ids in TWO IN-clause queries rather than one per edge / per member.
+    const existingTargetIds = existingEdges
+      .map((e) => e.targetId)
+      .filter((id): id is string => id !== null);
+    const existingTargetNodes = this.graph.getNodesByIds(existingTargetIds);
     const presentTargets = new Set<string>();
     for (const e of existingEdges) {
       const key = e.targetId ?? e.targetRef;
       if (key === null) continue;
       const targetIsNonLive =
         e.targetId !== null &&
-        this.graph.getNodeById(e.targetId)?.lifecycleState !== "live";
+        existingTargetNodes.get(e.targetId)?.lifecycleState !== "live";
       const notInDesired = !desiredMemberIds.has(key);
       if (targetIsNonLive || notInDesired) {
         this.mutator.tombstoneEdge(e.id);
@@ -145,9 +152,12 @@ export class ClusterOverlayImpl implements ClusterOverlay {
         presentTargets.add(key);
       }
     }
+    // Batch-hydrate the desired-member nodes so the per-member existence
+    // check + targetId-vs-targetRef branch below uses one query.
+    const desiredMemberNodes = this.graph.getNodesByIds(desiredMemberElementIds);
     for (const memberId of desiredMemberElementIds) {
       if (presentTargets.has(memberId)) continue;
-      const byId = this.graph.getNodeById(memberId);
+      const byId = desiredMemberNodes.get(memberId);
       if (byId !== undefined) {
         this.mutator.insertEdge({
           sourceId: clusterNodeId,
@@ -289,8 +299,11 @@ export class ClusterOverlayImpl implements ClusterOverlay {
     // Each member belongs to at most one cluster (per the algorithm),
     // so we expect a single live source. If multiple show up, return
     // the first live one.
+    // Per Fathom row `perf-getbyid-consumer-migrations` (5.0.1.2.3.1):
+    // batch the per-edge source-node hydration into one IN-clause query.
+    const sourceNodes = this.graph.getNodesByIds(edges.map((e) => e.sourceId));
     for (const edge of edges) {
-      const node = this.graph.getNodeById(edge.sourceId);
+      const node = sourceNodes.get(edge.sourceId);
       if (node !== undefined && node.lifecycleState === "live") {
         return asCluster(node);
       }
