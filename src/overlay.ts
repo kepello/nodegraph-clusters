@@ -15,6 +15,7 @@ import {
   CLUSTER_INDEXES,
   CLUSTER_METADATA_KIND,
   CLUSTER_METADATA_SCHEMA,
+  CLUSTER_SCHEMA_VERSION,
 } from "./schema.js";
 import type {
   ClusterInput,
@@ -35,6 +36,7 @@ export class ClusterOverlayImpl implements ClusterOverlay {
     // continue via `this.graph` (GraphReader surface).
     this.mutator = this.graph.registerOverlay({
       domain: CLUSTER_DOMAIN,
+      schemaVersion: CLUSTER_SCHEMA_VERSION,
       metadataSchema: CLUSTER_METADATA_SCHEMA,
       indexes: CLUSTER_INDEXES,
     });

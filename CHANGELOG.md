@@ -2,6 +2,14 @@
 
 All notable changes to `@kepello/nodegraph-clusters`. Format follows [Keep a Changelog](https://keepachangelog.com/).
 
+## [0.10.0] — 2026-05-28
+
+Adopt the per-overlay schema-version stamp (Fathom row 1.12.3). Exports `CLUSTER_SCHEMA_VERSION` (= 1, V1 baseline) and declares it on the overlay's `OverlayRegistration`.
+
+### Changed
+
+- Registration now passes the mandatory `schemaVersion` field added in substrate 1.12.2. Peer dependency on `@kepello/nodegraph-core` retargeted to `^3.0.0`. No behavior change beyond the version stamp.
+
 ## [0.9.0] — 2026-05-25
 
 Batch UUID→Node hydration in `reconcileGroupsEdges` + `clusterForElement`. Part of Fathom row `perf-getbyid-consumer-migrations` (5.0.1.2.3.1). Peer-bump `@kepello/nodegraph-core` `^2.2.0` → `^2.3.0`. No behavior change.

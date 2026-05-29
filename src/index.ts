@@ -8,6 +8,7 @@ export {
   CLUSTER_INDEXES,
   CLUSTER_METADATA_KIND,
   CLUSTER_METADATA_SCHEMA,
+  CLUSTER_SCHEMA_VERSION,
 } from "./schema.js";
 
 // Types

@@ -9,6 +9,14 @@ import type { IndexSpec, MetadataSchema } from "@kepello/nodegraph-core";
 export const CLUSTER_DOMAIN = "cluster";
 
 /**
+ * Per-overlay schema version (substrate 1.12.2). Part of this domain's
+ * public contract — every registrant of `CLUSTER_DOMAIN` passes this so
+ * the substrate's version stamp/tripwire stays in lockstep. Bump when
+ * `CLUSTER_METADATA_SCHEMA` changes shape; V1 baseline is `1`.
+ */
+export const CLUSTER_SCHEMA_VERSION = 1;
+
+/**
  * Discriminator stamped on every node this overlay writes. Reserved
  * value `"cluster"`; consumers must not overload the cluster domain
  * with other metadata kinds.

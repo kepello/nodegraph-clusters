@@ -20,7 +20,11 @@ import {
   type GraphLayer,
 } from "@kepello/nodegraph-core";
 import { InMemoryBackend } from "@kepello/nodegraph-core/in-memory";
-import { CLUSTER_DOMAIN, CLUSTER_METADATA_KIND } from "./schema.js";
+import {
+  CLUSTER_DOMAIN,
+  CLUSTER_METADATA_KIND,
+  CLUSTER_SCHEMA_VERSION,
+} from "./schema.js";
 import {
   ClusterOverlayImpl,
   GROUPS_EDGE_TYPE,
@@ -38,6 +42,19 @@ test("registerOverlay — idempotent on repeated construction", () => {
   // the substrate's "already-registered" rejection.
   assert.doesNotThrow(() => new ClusterOverlayImpl(graph));
   assert.ok(overlay1);
+});
+
+test("registerOverlay — wires CLUSTER_SCHEMA_VERSION into the persisted stamp (Fathom 1.12.3)", () => {
+  // Adoption pin: the overlay constructor declares the package's exported
+  // schema-version constant, and the substrate persists exactly that value
+  // to overlay_schemas. Guards against the registration drifting away from
+  // the public CLUSTER_SCHEMA_VERSION contract.
+  const backend = new InMemoryBackend();
+  const graph = new GraphLayerImpl(backend);
+  new ClusterOverlayImpl(graph);
+  const rows = backend.query("overlay_schemas", { domain: CLUSTER_DOMAIN });
+  assert.equal(rows.length, 1);
+  assert.equal(rows[0].schemaVersion, CLUSTER_SCHEMA_VERSION);
 });
 
 test("insertCluster — persists metadata + groups edges", () => {
@@ -232,6 +249,7 @@ test("clusterForElement — recovers membership by walking groups edges", () => 
   // Register a domain we can insert a "member element" into so the
   // cluster's groups edge resolves to a real id.
   graph.registerOverlay({
+    schemaVersion: 1,
     domain: "test-members",
     metadataSchema: { type: "object", properties: {} },
     indexes: [],
