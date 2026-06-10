@@ -2,6 +2,20 @@
 
 All notable changes to `@kepello/nodegraph-clusters`. Format follows [Keep a Changelog](https://keepachangelog.com/).
 
+## [0.11.0] — 2026-06-09
+
+**Cluster identity incorporates member identity** (Fathom row `l3-cluster-count-discrepancy-envisionweb` 5.0.48.2 — the L3-TS baseline M1 forcing bug). Content-only identity (`sha256(sorted member contentHashes)`) collided when two DISJOINT communities had identical member-content multisets — rampant in generated .NET code. EnvisionWeb measured 1,011 emitted → 963 persisted (4.7% silent collapse): colliding clusters merged compute-side (`clusterById` / `elementToCluster` keyed by clusterId, corrupting `dependsOn`/confidence/assignments) AND collapsed persist-side (same naturalKey + contentHash → no-op upsert; the last writer's `reconcileGroupsEdges` orphaned the first community's members).
+
+### Changed
+
+- **BREAKING**: `computeClusterId` now takes `Iterable<ClusterIdentityMember>` (`{identityKey, contentHash}`); identity = sha256 of sorted NUL-delimited pairs. **Deliberate property reversal**: renaming a member (identityKey change, same content) now CHANGES the clusterId — the old "identity tracks behavior, not naming" property was the collision bug. Enrichment survives id churn via `canonicalMemberSetHash` lift-forward (0.6.0 / row 5.0.31), unchanged.
+- `ElementInput.identityKey?: string` — rebuild-stable identity for clusterId computation, defaults to `id`. Callers whose ids are transient UUIDs pass the substrate naturalKey (fathom-cli does from `@4.41.0`).
+- `computeClusters` now THROWS on duplicate clusterIds across communities (only possible via duplicate `(identityKey, contentHash)` caller input) — fail-loud forcing function instead of silent merge.
+
+### Tests
+
+- 2 collision regressions (singleton×singleton — the generated-code corpus shape; disjoint multi-member identical multisets, incl. unmerged confidence/dependsOn), identityKey cross-rebuild stability, reversed rename pin, delimiter-unambiguity pin. 56 pass.
+
 ## [0.10.0] — 2026-05-28
 
 Adopt the per-overlay schema-version stamp (Fathom row 1.12.3). Exports `CLUSTER_SCHEMA_VERSION` (= 1, V1 baseline) and declares it on the overlay's `OverlayRegistration`.

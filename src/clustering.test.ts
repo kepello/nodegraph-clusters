@@ -4,8 +4,9 @@
  *   - Two strongly-connected components in the same input produce two
  *     clusters; an isolated node produces a singleton cluster.
  *   - Same input + same seed = same clusters (determinism).
- *   - Each cluster's contentHash + clusterId are derived from member
- *     contentHashes (not from element ids).
+ *   - Each cluster's clusterId is derived from member identity
+ *     (identityKey, defaulting to id) + contentHashes — 5.0.48.2;
+ *     contentHash stays content-only.
  *   - dependsOn aggregations sum inter-cluster edges per target.
  *   - confidenceScore = intra-cluster edge weight / total cluster edge
  *     weight (0..1).
@@ -150,8 +151,12 @@ test("computeClusters — determinism: reordered inputs produce identical cluste
   assert.equal(r1.clusters.length, r3.clusters.length);
 });
 
-test("computeClusters — clusterId is derived from member contentHashes, not element ids", () => {
-  // Same content hashes + different element ids → same clusterId.
+test("computeClusters — clusterId tracks member identity AND content (5.0.48.2 reversal)", () => {
+  // Pre-5.0.48.2 this pinned the OPPOSITE: same content hashes +
+  // different element ids → same clusterId. That property was the
+  // collision bug (disjoint communities of content-identical members
+  // merged). Now: identity change → id change; identityKey is the
+  // lever for cross-rebuild stability (see the identityKey test).
   const a = computeClusters({
     elements: [
       { id: "A", name: "n1", contentHash: "h1" },
@@ -172,10 +177,10 @@ test("computeClusters — clusterId is derived from member contentHashes, not el
       { source: "RENAMED_B", target: "RENAMED_A" },
     ],
   });
-  // Single cluster in each case; same clusterId.
+  // Single cluster in each case; DIFFERENT clusterId (identity moved).
   assert.equal(a.clusters.length, 1);
   assert.equal(b.clusters.length, 1);
-  assert.equal(a.clusters[0].clusterId, b.clusters[0].clusterId);
+  assert.notEqual(a.clusters[0].clusterId, b.clusters[0].clusterId);
 });
 
 test("computeClusters — dependsOn captures inter-cluster aggregate edge counts", () => {
@@ -279,4 +284,79 @@ test("computeClusters — self-loops are ignored", () => {
   });
   // Both elements still form a cluster; self-loop didn't crash anything.
   assert.equal(result.assignments.get("A"), result.assignments.get("B"));
+});
+
+// ---- Fathom row 5.0.48.2 — clusterId collision on identical member-content
+// multisets across DISJOINT communities. EnvisionWeb: 1,011 emitted → 963
+// persisted (4.7% silent loss) because generated .NET code yields many
+// distinct elements with identical contentHashes; content-only identity
+// merged their clusters compute-side AND collapsed them to one substrate
+// node persist-side. Identity must incorporate member identity. ----
+
+test("computeClusters — REGRESSION 5.0.48.2: two singleton communities with identical content get DISTINCT clusterIds", () => {
+  // The dominant corpus shape: generated companions produce distinct
+  // elements (different ids) with byte-identical content.
+  const result = computeClusters({
+    elements: [
+      { id: "gen/A", name: "InitializeComponent", contentHash: "SAME" },
+      { id: "gen/B", name: "InitializeComponent", contentHash: "SAME" },
+    ],
+    dependencies: [],
+  });
+  assert.equal(result.clusters.length, 2);
+  assert.notEqual(result.clusters[0].clusterId, result.clusters[1].clusterId);
+  // Each element maps to its OWN cluster, not a merged one.
+  assert.notEqual(result.assignments.get("gen/A"), result.assignments.get("gen/B"));
+});
+
+test("computeClusters — REGRESSION 5.0.48.2: disjoint multi-member communities with identical content multisets get DISTINCT clusterIds", () => {
+  const result = computeClusters({
+    elements: [
+      { id: "A", name: "FooA", contentHash: "h1" },
+      { id: "B", name: "FooB", contentHash: "h2" },
+      { id: "C", name: "BarC", contentHash: "h1" },
+      { id: "D", name: "BarD", contentHash: "h2" },
+    ],
+    dependencies: [
+      { source: "A", target: "B", weight: 5 },
+      { source: "C", target: "D", weight: 5 },
+    ],
+  });
+  assert.equal(result.clusters.length, 2);
+  const [c1, c2] = result.clusters;
+  assert.notEqual(c1.clusterId, c2.clusterId);
+  // Membership stays per-community — no cross-merge in assignments.
+  assert.equal(result.assignments.get("A"), result.assignments.get("B"));
+  assert.equal(result.assignments.get("C"), result.assignments.get("D"));
+  assert.notEqual(result.assignments.get("A"), result.assignments.get("C"));
+  // Confidence/dependsOn tallies must not have merged the two
+  // communities: each cluster's edges are fully intra-cluster.
+  for (const c of result.clusters) {
+    assert.equal(c.confidenceScore, 1);
+    assert.deepEqual(c.dependsOn, []);
+  }
+});
+
+test("computeClusters — identityKey overrides id for identity (rebuild-stable keys)", () => {
+  // Same identityKeys + same content under DIFFERENT transient ids
+  // (e.g. substrate UUIDs across a clean rebuild) → same clusterId.
+  const run1 = computeClusters({
+    elements: [
+      { id: "uuid-1", identityKey: "src/a.ts#Foo", name: "Foo", contentHash: "h1" },
+      { id: "uuid-2", identityKey: "src/b.ts#Bar", name: "Bar", contentHash: "h2" },
+    ],
+    dependencies: [{ source: "uuid-1", target: "uuid-2", weight: 5 }],
+  });
+  const run2 = computeClusters({
+    elements: [
+      { id: "uuid-9", identityKey: "src/a.ts#Foo", name: "Foo", contentHash: "h1" },
+      { id: "uuid-8", identityKey: "src/b.ts#Bar", name: "Bar", contentHash: "h2" },
+    ],
+    dependencies: [{ source: "uuid-9", target: "uuid-8", weight: 5 }],
+  });
+  assert.equal(run1.clusters.length, 1);
+  assert.deepEqual(
+    run1.clusters.map((c) => c.clusterId),
+    run2.clusters.map((c) => c.clusterId),
+  );
 });
