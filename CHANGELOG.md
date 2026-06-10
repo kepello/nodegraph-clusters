@@ -2,6 +2,14 @@
 
 All notable changes to `@kepello/nodegraph-clusters`. Format follows [Keep a Changelog](https://keepachangelog.com/).
 
+## [0.12.0] — 2026-06-09
+
+**Cross-rebuild partition determinism** (L3-TS baseline M4 measurement, Fathom row `l3-ts-baseline` 5.4.0). Canonical input order now sorts by the rebuild-stable `identityKey ?? id` (elements AND dependency endpoints, id tie-break) instead of raw id. Ids are typically substrate UUIDs that differ between clean rebuilds, so the 5.0.7 id-keyed canonicalization was a fresh shuffle per rebuild — Louvain's order-sensitive community walk produced 25/115 cluster-composition flips across two clean rebuilds of the unchanged Fathom workspace. With stable keys the partition reproduces exactly.
+
+### Tests
+
+- 24-node weak-clique-chain regression: identical identityKeys + edges under two id labelings must produce identical clusterId sets (pre-fix: 4/6/6/8 vs 6/6/6/6 partitions). 57 pass.
+
 ## [0.11.0] — 2026-06-09
 
 **Cluster identity incorporates member identity** (Fathom row `l3-cluster-count-discrepancy-envisionweb` 5.0.48.2 — the L3-TS baseline M1 forcing bug). Content-only identity (`sha256(sorted member contentHashes)`) collided when two DISJOINT communities had identical member-content multisets — rampant in generated .NET code. EnvisionWeb measured 1,011 emitted → 963 persisted (4.7% silent collapse): colliding clusters merged compute-side (`clusterById` / `elementToCluster` keyed by clusterId, corrupting `dependsOn`/confidence/assignments) AND collapsed persist-side (same naturalKey + contentHash → no-op upsert; the last writer's `reconcileGroupsEdges` orphaned the first community's members).

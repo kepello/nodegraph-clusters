@@ -360,3 +360,36 @@ test("computeClusters — identityKey overrides id for identity (rebuild-stable 
     run2.clusters.map((c) => c.clusterId),
   );
 });
+
+test("computeClusters — REGRESSION 5.4.0/M4: partition is stable under id relabeling when identityKeys are stable", () => {
+  // Cross-rebuild determinism: substrate UUIDs differ between clean
+  // rebuilds of identical source, and Louvain's community-merge walk
+  // is insertion-order-sensitive. Canonicalization must sort by the
+  // rebuild-stable identityKey, not the transient id — pre-fix this
+  // 24-node weak-clique chain partitioned 4/6/6/8 under one id order
+  // and 6/6/6/6 under another (L3-TS baseline M4 measurement,
+  // 25/115 cluster flips across two clean rebuilds).
+  const mk = (prefixes: string[]) => {
+    const n = 24;
+    const ids = [...Array(n).keys()].map(
+      (i) => `${prefixes[i % prefixes.length]}${String(i).padStart(2, "0")}`,
+    );
+    const elements = ids.map((id, i) => ({
+      id,
+      identityKey: `K${String(i).padStart(2, "0")}`,
+      name: `N${i}`,
+      contentHash: `h${i}`,
+    }));
+    const dependencies = [];
+    for (let i = 0; i < n; i++) {
+      dependencies.push({ source: ids[i], target: ids[(i + 1) % n] });
+      if (i % 2 === 0) dependencies.push({ source: ids[i], target: ids[(i + 2) % n] });
+    }
+    return { elements, dependencies };
+  };
+  const sig = (r: ReturnType<typeof computeClusters>) =>
+    r.clusters.map((c) => c.clusterId).sort().join("|");
+  const r1 = computeClusters(mk(["a", "b", "c"]));
+  const r2 = computeClusters(mk(["z", "y", "x"]));
+  assert.equal(sig(r1), sig(r2));
+});
