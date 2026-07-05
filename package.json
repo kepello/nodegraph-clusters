@@ -22,7 +22,7 @@
     "prepublishOnly": "npm run build"
   },
   "peerDependencies": {
-    "@kepello/nodegraph-core": "^5.0.0"
+    "@kepello/nodegraph-core": "^5.7.1"
   },
   "dependencies": {
     "graphology": "^0.25.4",
