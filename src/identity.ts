@@ -28,9 +28,7 @@
  *     carries enrichment across re-emissions.
  */
 
-import { createHash } from "node:crypto";
-
-const SHORT_HASH_LENGTH = 16;
+import { shortContentHash } from "@kepello/nodegraph-core";
 
 /** One member's contribution to cluster identity. */
 export interface ClusterIdentityMember {
@@ -55,7 +53,5 @@ export function computeClusterId(
     .map((m) => `${m.identityKey}\u0000${m.contentHash}`)
     .sort();
   if (lines.length === 0) return "empty";
-  const hasher = createHash("sha256");
-  hasher.update(lines.join("\n"));
-  return hasher.digest("hex").slice(0, SHORT_HASH_LENGTH);
+  return shortContentHash(lines);
 }
