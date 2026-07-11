@@ -46,8 +46,17 @@ export interface ClusterMetadata {
   language?: string;
   /** Number of L0 elements grouped. */
   memberCount: number;
-  /** Heuristic confidence rank ∈ [0, 1]; not calibrated to external benchmarks. */
-  confidenceScore?: number;
+  /**
+   * Heuristic confidence rank ∈ [0, 1]; not calibrated to external
+   * benchmarks. Honest-null contract (Fathom row
+   * `l3-confidence-honest-null-for-edgeless-clusters` 5.4.0.1): `null`
+   * when the ratio would be structurally forced by insufficient
+   * evidence (edge-less OR inbound-only cluster) — a forced 1.0 there
+   * is indistinguishable from genuine full cohesion. Absent entirely
+   * when the caller never supplied a score at all (distinct from an
+   * explicit `null`).
+   */
+  confidenceScore?: number | null;
   /** Per-target aggregate edge counts to other clusters. */
   dependsOn?: ClusterDependency[];
   /**
@@ -88,7 +97,14 @@ export interface ClusterInput {
   displayName?: string;
   language?: string;
   memberCount: number;
-  confidenceScore?: number;
+  /**
+   * Honest-null contract (Fathom row 5.4.0.1): pass `null` for an
+   * edge-less/inbound-only cluster (see `ComputedCluster
+   * .confidenceScore`) — omit the field entirely only when the caller
+   * has no score-computation story at all. `insertCluster` persists an
+   * explicit `null` distinctly from an omitted field.
+   */
+  confidenceScore?: number | null;
   dependsOn?: ClusterDependency[];
   /** Stable content-hash this cluster's identity was derived from. */
   contentHash: string;

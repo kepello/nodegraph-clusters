@@ -102,8 +102,21 @@ export interface ComputedCluster {
    * Confidence ∈ [0, 1] — share of the cluster's edges that stay
    * intra-cluster. High values indicate cohesive clusters; values
    * near 0 mean the cluster mostly talks to outside.
+   *
+   * Honest-null contract (Fathom row
+   * `l3-confidence-honest-null-for-edgeless-clusters` 5.4.0.1, mirrors
+   * `nodegraph-analysis/src/engine/derivations/cohesion.ts`'s
+   * `methodPairCohesion` null-on-insufficient-input shape): `null` when
+   * the ratio would be structurally forced by insufficient
+   * evidence — an edge-less cluster OR an inbound-only cluster (the
+   * denominator only tallies SOURCE-side edges, so a cluster that only
+   * ever appears as a dependency `target` also has zero counted
+   * edges). A forced 1.0 in that case is indistinguishable from
+   * genuine full cohesion — measured at 88% of live clusters sitting
+   * at exactly 1.0 before this fix. Real ratio, unchanged, whenever
+   * the cluster has at least one counted (source-side) edge.
    */
-  confidenceScore: number;
+  confidenceScore: number | null;
   dependsOn: ClusterDependency[];
 }
 
@@ -203,12 +216,12 @@ export function computeClusters(
     const [a, b] = dep.source < dep.target
       ? [dep.source, dep.target]
       : [dep.target, dep.source];
-    const key = `${a} ${b}`;
+    const key = `${a}\u0000${b}`;
     const w = dep.weight ?? 1;
     edgeWeight.set(key, (edgeWeight.get(key) ?? 0) + w);
   }
   for (const [key, weight] of edgeWeight) {
-    const [a, b] = key.split(" ");
+    const [a, b] = key.split("\u0000");
     graph.addEdge(a, b, { weight });
   }
 
@@ -363,7 +376,11 @@ export function computeClusters(
   for (const cluster of computedClusters) {
     const total = totalEdgesPerCluster.get(cluster.clusterId) ?? 0;
     const intra = intraEdgesPerCluster.get(cluster.clusterId) ?? 0;
-    cluster.confidenceScore = total === 0 ? 1 : intra / total;
+    // Honest-null contract (5.4.0.1): total === 0 means no counted
+    // (source-side) edges — edge-less OR inbound-only — so the ratio
+    // is structurally undefined, not a forced max. See ComputedCluster
+    // .confidenceScore's doc comment for the full rationale.
+    cluster.confidenceScore = total === 0 ? null : intra / total;
   }
 
   // Final assignment map: element-id -> cluster-id. Iterate the

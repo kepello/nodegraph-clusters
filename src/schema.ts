@@ -74,7 +74,7 @@ export const CLUSTER_METADATA_SCHEMA: MetadataSchema = {
       type: "number",
       title: "Confidence score",
       description:
-        "Internal modularity-quality contribution of the cluster, scaled to [0, 1]. Heuristic rank, not calibrated against external benchmarks. Operator threshold via `clusters.minConfidence`.",
+        "Internal modularity-quality contribution of the cluster, scaled to [0, 1]. Heuristic rank, not calibrated against external benchmarks. Operator threshold via `clusters.minConfidence`. null when structurally forced by insufficient evidence — an edge-less or inbound-only cluster (Fathom row 5.4.0.1, honest-null contract); a forced 1.0 there would be indistinguishable from genuine full cohesion.",
     },
     dependsOn: {
       type: "array",

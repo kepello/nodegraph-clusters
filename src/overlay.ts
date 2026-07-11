@@ -342,6 +342,10 @@ function buildMetadata(
   };
   if (input.displayName !== undefined) meta.displayName = input.displayName;
   if (input.language !== undefined) meta.language = input.language;
+  // `!== undefined` (not a truthiness/nullish check) is deliberate:
+  // honest-null contract (5.4.0.1) — an explicit `null` (edge-less or
+  // inbound-only cluster) must persist as an observable `null`, distinct
+  // from an omitted field (caller never computed a score at all).
   if (input.confidenceScore !== undefined) {
     meta.confidenceScore = input.confidenceScore;
   }

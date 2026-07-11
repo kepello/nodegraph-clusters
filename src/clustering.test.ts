@@ -9,7 +9,13 @@
  *     contentHash stays content-only.
  *   - dependsOn aggregations sum inter-cluster edges per target.
  *   - confidenceScore = intra-cluster edge weight / total cluster edge
- *     weight (0..1).
+ *     weight (0..1) — but only when the cluster has at least one
+ *     counted (source-side) edge. Honest-null contract (Fathom row
+ *     `l3-confidence-honest-null-for-edgeless-clusters` 5.4.0.1): an
+ *     edge-less cluster OR an inbound-only cluster (the denominator
+ *     tallies SOURCE-side edges only) has confidenceScore `null`, not
+ *     a forced 1.0 — a forced max is indistinguishable from a genuine
+ *     high-cohesion score.
  *   - Empty input returns no clusters and an empty assignment map.
  */
 
@@ -240,6 +246,56 @@ test("computeClusters — confidenceScore reflects intra-cluster cohesion", () =
   assert.equal(cluster_AB.confidenceScore, 1);
   // The CD cluster has C → D intra (10) and C → A out (10), score 0.5.
   assert.equal(cluster_CD.confidenceScore, 0.5);
+});
+
+// ---- Fathom row 5.4.0.1 (l3-confidence-honest-null-for-edgeless-clusters)
+// — honest-null contract, the L3 member of the confidence-saturation
+// class. `total === 0` (no counted source-side edges) must yield `null`,
+// never a forced max: 88% of live clusters measured at exactly 1.0,
+// indistinguishable from genuine high-cohesion. ----
+
+test("computeClusters — REGRESSION 5.4.0.1: edge-less cluster gets null confidenceScore (not forced 1.0)", () => {
+  const result = computeClusters({
+    elements: [{ id: "A", name: "FooClass", contentHash: "h1" }],
+    dependencies: [],
+  });
+  assert.equal(result.clusters.length, 1);
+  assert.equal(result.clusters[0].confidenceScore, null);
+});
+
+test("computeClusters — REGRESSION 5.4.0.1: inbound-only cluster gets null confidenceScore (denominator tallies source-side edges only)", () => {
+  // A is its own cluster and never originates a dependency edge — it
+  // only ever appears as a `target`. B/C form a strongly-linked second
+  // cluster (weight 1000, held together at resolution 1.5) with a
+  // single weak outbound edge into A. A's own totalEdgesPerCluster
+  // tally (source-side only) stays 0, so a forced 1.0 would be
+  // indistinguishable from genuine full cohesion.
+  const result = computeClusters(
+    {
+      elements: [
+        { id: "A", name: "Sink", contentHash: "h1" },
+        { id: "B", name: "FooB", contentHash: "h2" },
+        { id: "C", name: "FooC", contentHash: "h3" },
+      ],
+      dependencies: [
+        { source: "B", target: "C", weight: 1000 },
+        { source: "C", target: "B", weight: 1000 },
+        { source: "B", target: "A", weight: 1 },
+      ],
+    },
+    { resolution: 1.5 },
+  );
+  const clusterA = result.clusters.find((c) => c.memberElementIds.includes("A"));
+  const clusterBC = result.clusters.find((c) => c.memberElementIds.includes("B"));
+  assert.ok(clusterA);
+  assert.ok(clusterBC);
+  // A must have stayed its own singleton cluster — the strong B<->C
+  // link keeps them together and outweighs the weak B->A edge.
+  assert.equal(clusterA.memberElementIds.length, 1);
+  assert.equal(clusterA.confidenceScore, null);
+  // B/C's cluster has real counted (source-side) edges — its ratio
+  // stays the honest computed value, not null.
+  assert.notEqual(clusterBC.confidenceScore, null);
 });
 
 test("computeClusters — language tag set when uniform across members", () => {

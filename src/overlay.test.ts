@@ -79,6 +79,40 @@ test("insertCluster — persists metadata + groups edges", () => {
   }
 });
 
+// Fathom row 5.4.0.1 (l3-confidence-honest-null-for-edgeless-clusters):
+// an explicit `confidenceScore: null` must persist as an observable
+// `null` on read-back — distinct from a caller that never supplied the
+// field at all (which stays absent from metadata entirely).
+test("insertCluster — REGRESSION 5.4.0.1: explicit confidenceScore null persists and reads back as null", () => {
+  const graph = makeGraph();
+  const overlay = makeClusterOverlay(graph);
+  const node = overlay.insertCluster({
+    clusterId: "null-conf",
+    name: "cluster-edgeless",
+    memberCount: 1,
+    contentHash: "ch_null_conf",
+    memberElementIds: ["member1"],
+    confidenceScore: null,
+  });
+  assert.equal(node.metadata.confidenceScore, null);
+  const reread = overlay.getCluster("null-conf");
+  assert.ok(reread);
+  assert.equal(reread.metadata.confidenceScore, null);
+});
+
+test("insertCluster — confidenceScore omitted entirely stays absent from metadata (distinct from explicit null)", () => {
+  const graph = makeGraph();
+  const overlay = makeClusterOverlay(graph);
+  const node = overlay.insertCluster({
+    clusterId: "no-conf-field",
+    name: "cluster-no-score",
+    memberCount: 1,
+    contentHash: "ch_no_conf",
+    memberElementIds: ["member1"],
+  });
+  assert.equal("confidenceScore" in node.metadata, false);
+});
+
 test("insertCluster — idempotent on identical content-hash", () => {
   const graph = makeGraph();
   const overlay = makeClusterOverlay(graph);
