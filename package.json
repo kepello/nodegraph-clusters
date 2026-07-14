@@ -1,6 +1,6 @@
 {
   "name": "@kepello/nodegraph-clusters",
-  "version": "0.14.0",
+  "version": "0.15.0",
   "description": "Recovered-cluster overlay for @kepello/nodegraph: Louvain community detection over L0 element dependencies plus TF-IDF naming. Third layer of the Layered Code Abstraction arc.",
   "type": "module",
   "main": "dist/index.js",

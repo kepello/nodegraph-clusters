@@ -65,6 +65,23 @@ export interface ElementInput {
    * v1 in any case — see Fathom Trade-off list).
    */
   language?: string;
+  /**
+   * Every non-administrative L0 facet the substrate carries for this
+   * element (annotations, baseTypes, isStatic, scalars, ...), projected
+   * by the caller's shared `projectElementFacets` helper (Fathom row
+   * `overlay-projection-discards-14-of-19-facets`, 3.1.0.7). Plain
+   * `Record<string, unknown>` rather than an imported type — this
+   * package has no peer-dependency on `@kepello/nodegraph-analysis`
+   * (same decoupling rationale as every other plain-data field on this
+   * interface). Currently unconsumed by `computeClusters` — this row
+   * makes the facts ARRIVE; wiring a consumer is later work. Optional:
+   * making it required would force editing every hand-built `ElementInput`
+   * literal across this package's test suite for a field nothing reads
+   * yet (unlike `nodegraph-patterns`' `overridesByTarget`, which went
+   * required at a ≤2-touchpoint cost, this field's touchpoint count runs
+   * into the dozens — see the CHANGELOG entry for this version).
+   */
+  facets?: Readonly<Record<string, unknown>>;
 }
 
 /**

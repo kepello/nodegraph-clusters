@@ -2,6 +2,18 @@
 
 All notable changes to `@kepello/nodegraph-clusters`. Format follows [Keep a Changelog](https://keepachangelog.com/).
 
+## [0.15.0] — 2026-07-14
+
+Fathom row `overlay-projection-discards-14-of-19-facets` (3.1.0.7) — `fathom-cli`'s abstractions runner used to hand-project each L0 element down to `id`/`identityKey`/`name`/`contentHash`/`language` before calling `computeClusters`. Adds the field this row's shared facet bag lands on; `computeClusters` itself is unchanged (`facets` is not read by this package).
+
+### Added
+
+- `ElementInput.facets?: Readonly<Record<string, unknown>>` — the full L0 facet set (`@kepello/nodegraph-analysis`'s `projectElementFacets`), when the caller supplies it. Plain structural type, not an imported one — this package still has no peer-dependency on `nodegraph-analysis` (same decoupling rationale as every other field on `ElementInput`). Optional, not required: making it required would force editing every hand-built `ElementInput` literal across this package's test suite for a field `computeClusters` doesn't read yet.
+
+### Tests
+
+Suite unchanged: 62/62 pass. `npm run build` clean.
+
 ## [0.14.0] — 2026-07-11
 
 Two bundled fixes: the NUL-byte source-hygiene bug (Fathom row `source-control-bytes-ratchet-ungeneralized` 5.0.106.2) and the L3 member of the confidence-saturation class, `l3-confidence-honest-null-for-edgeless-clusters` (5.4.0.1) — the honest-null contract L6/L7 will mirror for their own `confidenceScore` fields.
