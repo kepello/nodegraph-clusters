@@ -3,13 +3,16 @@
  *
  *   - registerOverlay is idempotent (constructing a second overlay
  *     over the same graph doesn't throw).
- *   - insertCluster persists metadata + group edges.
+ *   - insertCluster persists metadata + analysis-disposition (kind
+ *     `groups`) member edges — THE membership record since wave 4
+ *     (Fathom row 3.1.8.4); the legacy `groups` edge type is retired.
  *   - insertCluster is idempotent on identical content-hash (no
  *     supersession, no duplicate edges).
  *   - insertCluster supersedes on different content-hash.
  *   - renameCluster updates displayName without changing identity.
  *   - tombstoneCluster removes the cluster from listClusters.
- *   - clusterForElement walks `groups` edges to recover membership.
+ *   - clusterForElement walks `analysis-disposition` edges (kind
+ *     `groups`) to recover membership.
  *   - membersOf returns the edges that belong to a cluster.
  */
 
@@ -23,18 +26,28 @@ import { InMemoryBackend } from "@kepello/nodegraph-core/in-memory";
 import { ANALYSIS_DISPOSITION_EDGE_TYPE } from "@kepello/nodegraph-dispositions";
 import {
   CLUSTER_DOMAIN,
+  CLUSTER_INDEXES,
   CLUSTER_METADATA_KIND,
+  CLUSTER_METADATA_SCHEMA,
   CLUSTER_SCHEMA_VERSION,
 } from "./schema.js";
 import {
   ClusterOverlayImpl,
-  GROUPS_EDGE_TYPE,
   makeClusterOverlay,
 } from "./overlay.js";
 
 function makeGraph(): GraphLayer {
   return new GraphLayerImpl(new InMemoryBackend());
 }
+
+// Fathom row 3.1.8.4 (disposition-layer wave 4): the legacy `groups`
+// edge type this overlay emitted before wave 4 retired it. No longer
+// exported by the package (dead export removed with the emission it
+// named) — kept here ONLY as a literal so the retirement pins below can
+// assert its absence directly against the substrate, and so the
+// disposition-only-store pin can strip it out to simulate the
+// post-retirement shape.
+const LEGACY_GROUPS_EDGE_TYPE = "groups";
 
 test("registerOverlay — idempotent on repeated construction", () => {
   const graph = makeGraph();
@@ -58,7 +71,7 @@ test("registerOverlay — wires CLUSTER_SCHEMA_VERSION into the persisted stamp 
   assert.equal(rows[0].schemaVersion, CLUSTER_SCHEMA_VERSION);
 });
 
-test("insertCluster — persists metadata + groups edges", () => {
+test("insertCluster — persists metadata + analysis-disposition (groups) member edges", () => {
   const graph = makeGraph();
   const overlay = makeClusterOverlay(graph);
   const node = overlay.insertCluster({
@@ -76,7 +89,8 @@ test("insertCluster — persists metadata + groups edges", () => {
   const edges = overlay.membersOf("abc123");
   assert.equal(edges.length, 2);
   for (const e of edges) {
-    assert.equal(e.type, GROUPS_EDGE_TYPE);
+    assert.equal(e.type, ANALYSIS_DISPOSITION_EDGE_TYPE);
+    assert.equal(e.subtype, "groups");
   }
 });
 
@@ -132,7 +146,7 @@ test("insertCluster — idempotent on identical content-hash", () => {
     memberElementIds: ["m1"],
   });
   assert.equal(a.id, b.id);
-  // Should not duplicate the groups edge.
+  // Should not duplicate the membership edge.
   assert.equal(overlay.membersOf("xyz").length, 1);
 });
 
@@ -178,18 +192,18 @@ test("renameCluster — updates displayName, preserves clusterId", () => {
   assert.equal(renamed.metadata.name, "cluster-auto");
 });
 
-test("renameCluster — PRESERVES groups edges through supersede (Fathom 5.0.39)", () => {
+test("renameCluster — PRESERVES edges through supersede (Fathom 5.0.39)", () => {
   // Round-7 follow-up. The bug: `renameCluster` calls
   // `graph.supersedeNode` to update displayName, which CASCADES the
   // prior node's outgoing live edges to tombstoned (per the substrate
   // conformance test). The current implementation does NOT re-emit
-  // groups edges from the new node — so the renamed cluster loses its
-  // membership entirely.
+  // membership edges from the new node — so the renamed cluster loses
+  // its membership entirely.
   //
   // Invariant: after any overlay-method-driven supersede of a cluster
   // node, liveMemberCount MUST equal the cluster's memberCount. The
-  // overlay owns the groups-edge invariant; its OWN methods MUST
-  // honor it.
+  // overlay owns the membership-edge invariant (analysis-disposition,
+  // kind `groups`, since wave 4); its OWN methods MUST honor it.
   const graph = makeGraph();
   const overlay = makeClusterOverlay(graph);
   overlay.insertCluster({
@@ -204,20 +218,21 @@ test("renameCluster — PRESERVES groups edges through supersede (Fathom 5.0.39)
   assert.equal(
     overlay.liveMemberCount("preserve-me"),
     3,
-    "renameCluster lost groups edges — bug introduced by raw supersedeNode without edge reconciliation",
+    "renameCluster lost membership edges — bug introduced by raw supersedeNode without edge reconciliation",
   );
 });
 
-test("setEnrichment — preserves groups edges and writes llmEnrichment (Fathom 5.0.39)", () => {
+test("setEnrichment — preserves edges and writes llmEnrichment (Fathom 5.0.39)", () => {
   // The new overlay method to be added by 5.0.39's fix. Currently the
   // Haiku-namer script bypasses the overlay and calls
   // `graph.supersedeNode` directly to write `llmEnrichment` onto the
-  // cluster's metadata. That bypass tombstones the cluster's groups
-  // edges (substrate cascade) without re-emitting them, breaking
-  // cluster_summary + layering_violations on every enriched cluster.
+  // cluster's metadata. That bypass tombstones the cluster's
+  // membership edges (substrate cascade) without re-emitting them,
+  // breaking cluster_summary + layering_violations on every enriched
+  // cluster.
   //
   // The fix: `setEnrichment(clusterId, llmEnrichment)` on the
-  // overlay. Wraps supersedeNode + reconciles groups edges in one
+  // overlay. Wraps supersedeNode + reconciles membership edges in one
   // transaction.
   const graph = makeGraph();
   const overlay = makeClusterOverlay(graph);
@@ -244,7 +259,7 @@ test("setEnrichment — preserves groups edges and writes llmEnrichment (Fathom 
   assert.equal(
     overlay.liveMemberCount("to-enrich"),
     4,
-    "setEnrichment lost groups edges — same class of bug as renameCluster",
+    "setEnrichment lost membership edges — same class of bug as renameCluster",
   );
   const cluster = overlay.getCluster("to-enrich");
   const enriched = cluster?.metadata.llmEnrichment;
@@ -279,10 +294,10 @@ test("tombstoneCluster — silent no-op on unknown clusterId", () => {
   assert.doesNotThrow(() => overlay.tombstoneCluster("nonexistent"));
 });
 
-test("clusterForElement — recovers membership by walking groups edges", () => {
+test("clusterForElement — recovers membership via analysis-disposition edges", () => {
   const graph = makeGraph();
   // Register a domain we can insert a "member element" into so the
-  // cluster's groups edge resolves to a real id.
+  // cluster's membership edge resolves to a real id.
   graph.registerOverlay({
     schemaVersion: 1,
     domain: "test-members",
@@ -344,7 +359,7 @@ test("liveMemberCount — reflects live edges, not the at-insert snapshot (row 5
   const graph = makeGraph();
   const overlay = makeClusterOverlay(graph);
 
-  // Insert three member element nodes so the groups edges are
+  // Insert three member element nodes so the membership edges are
   // resolved (live tombstone cascade requires resolved targetIds).
   graph.transaction(
     { kind: "test-elements", producerDomain: "analysis", summary: "test setup" },
@@ -387,7 +402,7 @@ test("liveMemberCount — reflects live edges, not the at-insert snapshot (row 5
   assert.equal(overlay.liveMemberCount("cluster-x"), 1);
 });
 
-test("insertCluster — re-emits groups edges after element supersede (Fathom 5.0.22)", () => {
+test("insertCluster — re-emits after element supersede (Fathom 5.0.22)", () => {
   // Regression for Fathom row 5.0.22: prior code deduped existing
   // edges by targetId, so when a member element superseded (new UUID,
   // same naturalKey) the dedup check missed the new UUID and emitted
@@ -440,8 +455,8 @@ test("insertCluster — re-emits groups edges after element supersede (Fathom 5.
   // And those 2 members must point at LIVE element nodes.
   const clusterNode = graph.getLiveNodeByNaturalKey("cluster", "C1")!;
   const liveTargetCount = graph
-    .edgesFrom(clusterNode.id, { type: GROUPS_EDGE_TYPE })
-    .filter((e) => e.targetId !== null)
+    .edgesFrom(clusterNode.id, { type: ANALYSIS_DISPOSITION_EDGE_TYPE })
+    .filter((e) => e.subtype === "groups" && e.targetId !== null)
     .map((e) => graph.getNodeById(e.targetId!))
     .filter((n) => n !== undefined && n.lifecycleState === "live")
     .length;
@@ -491,7 +506,7 @@ test("insertCluster — drops members no longer in input (drift-down)", () => {
 
 test("insertCluster — re-emits after tombstone cascade (Fathom 5.0.22 ghost variant)", () => {
   // Regression: when a member element tombstones, the substrate
-  // cascade tombstones the cluster's outgoing groups edge to it
+  // cascade tombstones the cluster's outgoing membership edge to it
   // (incoming-to-target cascade). A subsequent insertCluster call
   // must re-emit fresh edges for the surviving members — the prior
   // code's `existingTargets` dedup was correct in this branch (the
@@ -544,16 +559,17 @@ test("liveMemberCount — returns 0 for unknown clusterId", () => {
   assert.equal(overlay.liveMemberCount("does-not-exist"), 0);
 });
 
-// Fathom row 3.1.8.4 (disposition-layer wave 3a): ADDITIVE — insertCluster's
-// groups-edge reconciliation ALSO emits `analysis-disposition` edges
-// (single kind `"groups"`) via `@kepello/nodegraph-dispositions`'s
-// `recordDispositions`, authored through THIS overlay's own
-// CLUSTER_DOMAIN-scoped mutator (substrate rule 5.0.42 — the edge
-// source is the cluster node, in the `cluster` domain, never
-// `disposition`). Membership (`groups`) edges STAY — both families
-// coexist until wave 4 retires membership emission.
+// Fathom row 3.1.8.4 (disposition-layer wave 4): the `groups` membership
+// family is RETIRED. `analysis-disposition` edges (single kind
+// `"groups"`), authored through THIS overlay's own CLUSTER_DOMAIN-scoped
+// mutator via `@kepello/nodegraph-dispositions`'s `recordDispositions`
+// (substrate rule 5.0.42 — the edge source is the cluster node, in the
+// `cluster` domain, never `disposition`), are now THE membership record.
+// The legacy `groups` edge type is no longer emitted, and its constant
+// is no longer exported from this package (dead export removed with the
+// emission it named).
 
-test("insertCluster — ALSO emits analysis-disposition edges (kind groups) for every member (Fathom row 3.1.8.4 wave 3a)", () => {
+test("insertCluster — emits ONLY analysis-disposition edges (kind groups); legacy groups edges are RETIRED (Fathom row 3.1.8.4 wave 4)", () => {
   const graph = makeGraph();
   const overlay = makeClusterOverlay(graph);
   overlay.insertCluster({
@@ -565,16 +581,18 @@ test("insertCluster — ALSO emits analysis-disposition edges (kind groups) for 
   });
   const clusterNode = graph.getLiveNodeByNaturalKey(CLUSTER_DOMAIN, "disp-basic")!;
 
-  // Membership edges STAY. (member1/member2 are bare ids with no
-  // backing node — dangling targetRef edges; includeDangling: true
-  // resolves them, same as `membersOf`'s own convention.)
-  const groupsEdges = graph.edgesFrom(clusterNode.id, {
-    type: GROUPS_EDGE_TYPE,
+  // Wave 4: the legacy `groups` edge family is RETIRED — a lingering
+  // edge of that type would mean the retirement is incomplete.
+  const legacyGroupsEdges = graph.edgesFrom(clusterNode.id, {
+    type: LEGACY_GROUPS_EDGE_TYPE,
     includeDangling: true,
   });
-  assert.equal(groupsEdges.length, 2);
+  assert.equal(legacyGroupsEdges.length, 0);
 
-  // New: analysis-disposition edges, one per member, single kind "groups".
+  // analysis-disposition edges, one per member, single kind "groups" —
+  // THE membership record. (member1/member2 are bare ids with no
+  // backing node — dangling targetRef edges; includeDangling: true
+  // resolves them, same as `membersOf`'s own convention.)
   const dispositionEdges = graph.edgesFrom(clusterNode.id, {
     type: ANALYSIS_DISPOSITION_EDGE_TYPE,
     includeDangling: true,
@@ -588,6 +606,80 @@ test("insertCluster — ALSO emits analysis-disposition edges (kind groups) for 
     assert.equal(e.subtype, "groups");
     assert.deepEqual(e.metadata?.kinds, ["groups"]);
   }
+});
+
+test("clusterForElement / membersOf / liveMemberCount — work against a store with ONLY analysis-disposition edges (Fathom row 3.1.8.4 wave 4)", () => {
+  // Wave 4's read paths must derive membership from the disposition
+  // family alone — this is what every NEW analyze run produces (the
+  // legacy `groups` family is never written). Simulate that shape by
+  // stripping any legacy edges out from underneath a normal
+  // `insertCluster` call, through a second CLUSTER_DOMAIN mutator
+  // (`registerOverlay` is idempotent — see the "idempotent on repeated
+  // construction" pin above), then exercise every read purely against
+  // the surviving disposition edges.
+  const graph = makeGraph();
+  const overlay = makeClusterOverlay(graph);
+  graph.registerOverlay({
+    schemaVersion: 1,
+    domain: "test-members",
+    metadataSchema: { type: "object", properties: {} },
+    indexes: [],
+  });
+  const memberNode = graph.transaction(
+    { kind: "test", producerDomain: "test-members", summary: "seed member" },
+    () => graph.insertNode({
+      domain: "test-members",
+      naturalKey: "onlyDispMember",
+      contentHash: "ch1",
+      metadata: {},
+    }),
+  ).result;
+
+  overlay.insertCluster({
+    clusterId: "disp-only",
+    name: "cluster-disp-only",
+    memberCount: 1,
+    contentHash: "h1",
+    memberElementIds: [memberNode.id],
+  });
+  const clusterNode = graph.getLiveNodeByNaturalKey(CLUSTER_DOMAIN, "disp-only")!;
+
+  const clusterMutator = graph.registerOverlay({
+    domain: CLUSTER_DOMAIN,
+    schemaVersion: CLUSTER_SCHEMA_VERSION,
+    metadataSchema: CLUSTER_METADATA_SCHEMA,
+    indexes: CLUSTER_INDEXES,
+  });
+  graph.transaction(
+    {
+      kind: "test-strip-legacy",
+      producerDomain: CLUSTER_DOMAIN,
+      summary: "strip legacy groups edges to simulate a disposition-only store",
+    },
+    () => {
+      for (const e of graph.edgesFrom(clusterNode.id, {
+        type: LEGACY_GROUPS_EDGE_TYPE,
+        includeDangling: true,
+      })) {
+        clusterMutator.tombstoneEdge(e.id);
+      }
+    },
+  );
+  assert.equal(
+    graph.edgesFrom(clusterNode.id, { type: LEGACY_GROUPS_EDGE_TYPE, includeDangling: true }).length,
+    0,
+    "setup check — legacy groups edges must be gone before exercising the disposition-only read path",
+  );
+
+  const found = overlay.clusterForElement(memberNode.id);
+  assert.ok(found, "clusterForElement must resolve membership from analysis-disposition edges alone");
+  assert.equal(found.metadata.clusterId, "disp-only");
+
+  const members = overlay.membersOf("disp-only");
+  assert.equal(members.length, 1);
+  assert.equal(members[0]!.targetId, memberNode.id);
+
+  assert.equal(overlay.liveMemberCount("disp-only"), 1);
 });
 
 test("insertCluster — analysis-disposition edges idempotent on identical content-hash (no duplicates)", () => {
@@ -610,7 +702,7 @@ test("insertCluster — analysis-disposition edges idempotent on identical conte
   assert.equal(dispositionEdges.length, 1);
 });
 
-test("insertCluster — analysis-disposition edges reconcile on drift-down, mirroring groups edges (Fathom row 3.1.8.4 wave 3a)", () => {
+test("insertCluster — analysis-disposition edges reconcile on drift-down (Fathom row 3.1.8.4)", () => {
   // Same shape as "insertCluster — drops members no longer in input
   // (drift-down)" above, but for the new disposition-edge family: a
   // stale disposition edge to a member that left the cluster must
@@ -659,7 +751,7 @@ test("insertCluster — analysis-disposition edges reconcile on drift-down, mirr
   assert.equal(liveDispositionEdges[0]!.targetId, m1.id);
 });
 
-test("renameCluster — PRESERVES analysis-disposition edges through supersede, mirroring groups edges (Fathom row 3.1.8.4 wave 3a)", () => {
+test("renameCluster — PRESERVES analysis-disposition edges through supersede (Fathom row 3.1.8.4)", () => {
   const graph = makeGraph();
   const overlay = makeClusterOverlay(graph);
   overlay.insertCluster({
@@ -678,6 +770,6 @@ test("renameCluster — PRESERVES analysis-disposition edges through supersede, 
   assert.equal(
     dispositionEdges.length,
     3,
-    "renameCluster lost analysis-disposition edges — same class of bug 5.0.39 fixed for groups edges",
+    "renameCluster lost analysis-disposition edges — same class of bug 5.0.39 fixed for the legacy groups family",
   );
 });

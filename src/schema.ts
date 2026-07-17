@@ -32,7 +32,7 @@ export const CLUSTER_METADATA_SCHEMA: MetadataSchema = {
   type: "object",
   title: "Recovered cluster",
   description:
-    "A cohesive grouping of L0 element nodes recovered by Louvain community detection over their dependency edges. One node per cluster; `dependsOn` carries per-target aggregate counts to other clusters; members are reachable via outgoing `groups` edges this overlay writes.",
+    "A cohesive grouping of L0 element nodes recovered by Louvain community detection over their dependency edges. One node per cluster; `dependsOn` carries per-target aggregate counts to other clusters; members are reachable via outgoing `analysis-disposition` edges (kind `groups`) this overlay writes.",
   required: ["kind", "clusterId", "name", "memberCount"],
   properties: {
     kind: {

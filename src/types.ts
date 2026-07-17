@@ -109,9 +109,10 @@ export interface ClusterInput {
   /** Stable content-hash this cluster's identity was derived from. */
   contentHash: string;
   /**
-   * Member element ids the overlay should attach via outgoing `groups`
-   * edges at write time. May be UUIDs (resolved) or natural-key strings
-   * (substrate stores as `targetRef` and resolves lazily).
+   * Member element ids the overlay should attach via outgoing
+   * `analysis-disposition` edges (kind `groups`) at write time. May be
+   * UUIDs (resolved) or natural-key strings (substrate stores as
+   * `targetRef` and resolves lazily).
    */
   memberElementIds: readonly string[];
   /**
@@ -151,8 +152,9 @@ export interface ClusterNode extends Omit<Node, "metadata"> {
 export interface ClusterOverlay {
   /**
    * Insert (or upsert at the substrate level) a cluster node + its
-   * `groups` member edges. Returns the persisted cluster node.
-   * Idempotent on identical input.
+   * member edges (`analysis-disposition`, kind `groups` — THE
+   * membership record since Fathom row 3.1.8.4 wave 4). Returns the
+   * persisted cluster node. Idempotent on identical input.
    */
   insertCluster(input: ClusterInput): ClusterNode;
 
@@ -167,7 +169,7 @@ export interface ClusterOverlay {
    * Write `llmEnrichment` onto a cluster's metadata without changing
    * identity. Per Fathom row 5.0.39: this is the ONLY correct path to
    * persist LLM enrichment — calling `graph.supersedeNode` directly
-   * tombstones the cluster's `groups` edges and breaks membership.
+   * tombstones the cluster's membership edges and breaks membership.
    */
   setEnrichment(
     clusterId: string,
@@ -187,26 +189,28 @@ export interface ClusterOverlay {
 
   /**
    * Resolve the cluster (if any) that groups a given element id.
-   * Walks the `groups` edges; returns undefined when the element
-   * has not been assigned to any cluster.
+   * Walks the `analysis-disposition` edges (kind `groups`); returns
+   * undefined when the element has not been assigned to any cluster.
    */
   clusterForElement(elementId: string): ClusterNode | undefined;
 
   /**
-   * Outgoing `groups` edges for a cluster — the element ids it owns.
-   * Returns substrate edges; targetId is set for resolved members,
-   * targetRef for unresolved (dangling) ones.
+   * Outgoing `analysis-disposition` edges (kind `groups`) for a
+   * cluster — the element ids it owns. Returns substrate edges;
+   * targetId is set for resolved members, targetRef for unresolved
+   * (dangling) ones.
    */
   membersOf(clusterId: string): Edge[];
 
   /**
-   * Current live-member count derived from `groups` edges. Closes
-   * Fathom row 5.1.4.3: cluster metadata's `memberCount` is set at
-   * insert time and goes stale as member elements are tombstoned by
-   * downstream analyzer runs (substrate's `tombstoneNode` cascade
-   * also tombstones incoming edges, including this cluster's
-   * `groups` edges to that element). Consumers wanting the *current*
-   * count must read this instead of `metadata.memberCount`.
+   * Current live-member count derived from `analysis-disposition`
+   * (kind `groups`) edges. Closes Fathom row 5.1.4.3: cluster
+   * metadata's `memberCount` is set at insert time and goes stale as
+   * member elements are tombstoned by downstream analyzer runs
+   * (substrate's `tombstoneNode` cascade also tombstones incoming
+   * edges, including this cluster's membership edge to that element).
+   * Consumers wanting the *current* count must read this instead of
+   * `metadata.memberCount`.
    *
    * Returns 0 when the cluster doesn't exist or has no live members.
    */

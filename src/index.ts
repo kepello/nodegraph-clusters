@@ -43,6 +43,5 @@ export {
 // Overlay
 export {
   ClusterOverlayImpl,
-  GROUPS_EDGE_TYPE,
   makeClusterOverlay,
 } from "./overlay.js";
