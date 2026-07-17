@@ -2,6 +2,14 @@
 
 All notable changes to `@kepello/nodegraph-clusters`. Format follows [Keep a Changelog](https://keepachangelog.com/).
 
+## [0.16.1] — 2026-07-16
+
+Peer-floor sync, 3.1.8.4 wave 3a/3b sibling bumps — no code change. `@kepello/nodegraph-dispositions` peer floor `^0.1.0` → `^0.2.0` (0.x caret — did not admit the installed `0.2.0` without the bump).
+
+### Tests
+
+Suite unchanged: 66/66 pass. `npm run build` clean.
+
 ## [0.16.0] — 2026-07-16
 
 Fathom row 3.1.8.4 (disposition-layer), wave 3a — ADDITIVE. `insertCluster`'s member-edge reconciliation now ALSO emits `analysis-disposition` edges (`@kepello/nodegraph-dispositions`), one per member, carrying the single positive kind `groups`. Membership (`groups`) edges are unchanged and stay live — the two families coexist until wave 4 retires membership emission in favor of reading the disposition edges directly. No refusal work in this wave: L3's negative dispositions (the `kind-ineligible` / `fixture` refusal points) already live on the `fathom-cli` side since wave 2, and wave 2's corpus measurement found L3's conservation residual already at 0 — nothing for this repo to name.
