@@ -11,6 +11,12 @@
 
 import type { Edge, GraphLayer, GraphMutator, Node } from "@kepello/nodegraph-core";
 import {
+  ANALYSIS_DISPOSITION_EDGE_TYPE,
+  makeDispositionOverlay,
+  type DispositionCandidate,
+  type DispositionOverlay,
+} from "@kepello/nodegraph-dispositions";
+import {
   CLUSTER_DOMAIN,
   CLUSTER_INDEXES,
   CLUSTER_METADATA_KIND,
@@ -29,6 +35,14 @@ export const GROUPS_EDGE_TYPE = "groups";
 
 export class ClusterOverlayImpl implements ClusterOverlay {
   private readonly mutator: GraphMutator<typeof CLUSTER_DOMAIN>;
+  // Fathom row 3.1.8.4 (disposition-layer wave 3a): the shared
+  // disposition overlay, used ONLY to call `recordDispositions` with
+  // THIS overlay's own CLUSTER_DOMAIN-scoped mutator (see that
+  // package's overlay.ts doc comment — `analysis-disposition` edges
+  // are sourced in the PRODUCING domain, never `disposition`, per
+  // substrate rule 5.0.42). Construction is idempotent (mirrors this
+  // class's own `registerOverlay` idempotency, pinned above).
+  private readonly dispositions: DispositionOverlay;
 
   constructor(private readonly graph: GraphLayer) {
     // Per Fathom row 5.0.42: registerOverlay returns the domain-scoped
@@ -40,6 +54,7 @@ export class ClusterOverlayImpl implements ClusterOverlay {
       metadataSchema: CLUSTER_METADATA_SCHEMA,
       indexes: CLUSTER_INDEXES,
     });
+    this.dispositions = makeDispositionOverlay(this.graph);
   }
 
   insertCluster(input: ClusterInput): ClusterNode {
@@ -123,6 +138,12 @@ export class ClusterOverlayImpl implements ClusterOverlay {
    * on a cluster node cascades the prior tip's outgoing edges to
    * tombstoned — every method that supersedes the cluster node MUST
    * call this helper afterwards to re-establish membership.
+   *
+   * Fathom row 3.1.8.4 (disposition-layer wave 3a, ADDITIVE): also
+   * reconciles this cluster's `analysis-disposition` edges (kind
+   * `"groups"`, single-kind) to mirror the same desired member set —
+   * see `reconcileDispositionEdges` below. `groups` edges STAY; the two
+   * families coexist until wave 4 retires membership emission.
    */
   private reconcileGroupsEdges(
     clusterNodeId: string,
@@ -174,6 +195,49 @@ export class ClusterOverlayImpl implements ClusterOverlay {
         });
       }
     }
+
+    this.reconcileDispositionEdges(clusterNodeId, desiredMemberElementIds);
+  }
+
+  /**
+   * Reconcile a cluster node's outgoing `analysis-disposition` edges
+   * (kind `"groups"`) to mirror `desiredMemberElementIds`, exactly
+   * paralleling `reconcileGroupsEdges` above: tombstone any live
+   * disposition edge whose target isn't in the desired set (a member
+   * that left the cluster — a lingering edge would silently misstate
+   * provenance), then `recordDispositions` the full desired set (the
+   * disposition overlay's own create-or-update collapse handles the
+   * unchanged-member no-op).
+   *
+   * Fathom row 3.1.8.4 (disposition-layer wave 3a). Sourced through
+   * THIS overlay's `mutator` (CLUSTER_DOMAIN) — per the disposition
+   * package's own `overlay.ts` doc comment, `analysis-disposition`
+   * edges must be authored by the PRODUCING overlay's domain-scoped
+   * mutator, never `disposition`'s own.
+   */
+  private reconcileDispositionEdges(
+    clusterNodeId: string,
+    desiredMemberElementIds: readonly string[],
+  ): void {
+    const desiredMemberIds = new Set(desiredMemberElementIds);
+    const existingDispositionEdges = this.graph.edgesFrom(clusterNodeId, {
+      type: ANALYSIS_DISPOSITION_EDGE_TYPE,
+      includeDangling: true,
+    });
+    for (const e of existingDispositionEdges) {
+      const key = e.targetId ?? e.targetRef;
+      if (key === null || !desiredMemberIds.has(key)) {
+        this.mutator.tombstoneEdge(e.id);
+      }
+    }
+    if (desiredMemberElementIds.length === 0) return;
+    const desiredMemberNodes = this.graph.getNodesByIds(desiredMemberElementIds);
+    const batch: DispositionCandidate[] = desiredMemberElementIds.map((memberId) =>
+      desiredMemberNodes.has(memberId)
+        ? { sourceId: clusterNodeId, targetId: memberId, kind: "groups" }
+        : { sourceId: clusterNodeId, targetRef: memberId, kind: "groups" },
+    );
+    this.dispositions.recordDispositions(this.mutator, batch);
   }
 
   renameCluster(clusterId: string, displayName: string): ClusterNode {

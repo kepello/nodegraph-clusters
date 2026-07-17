@@ -20,6 +20,7 @@ import {
   type GraphLayer,
 } from "@kepello/nodegraph-core";
 import { InMemoryBackend } from "@kepello/nodegraph-core/in-memory";
+import { ANALYSIS_DISPOSITION_EDGE_TYPE } from "@kepello/nodegraph-dispositions";
 import {
   CLUSTER_DOMAIN,
   CLUSTER_METADATA_KIND,
@@ -541,4 +542,142 @@ test("liveMemberCount — returns 0 for unknown clusterId", () => {
   const graph = makeGraph();
   const overlay = makeClusterOverlay(graph);
   assert.equal(overlay.liveMemberCount("does-not-exist"), 0);
+});
+
+// Fathom row 3.1.8.4 (disposition-layer wave 3a): ADDITIVE — insertCluster's
+// groups-edge reconciliation ALSO emits `analysis-disposition` edges
+// (single kind `"groups"`) via `@kepello/nodegraph-dispositions`'s
+// `recordDispositions`, authored through THIS overlay's own
+// CLUSTER_DOMAIN-scoped mutator (substrate rule 5.0.42 — the edge
+// source is the cluster node, in the `cluster` domain, never
+// `disposition`). Membership (`groups`) edges STAY — both families
+// coexist until wave 4 retires membership emission.
+
+test("insertCluster — ALSO emits analysis-disposition edges (kind groups) for every member (Fathom row 3.1.8.4 wave 3a)", () => {
+  const graph = makeGraph();
+  const overlay = makeClusterOverlay(graph);
+  overlay.insertCluster({
+    clusterId: "disp-basic",
+    name: "cluster-disp",
+    memberCount: 2,
+    contentHash: "ch_disp",
+    memberElementIds: ["member1", "member2"],
+  });
+  const clusterNode = graph.getLiveNodeByNaturalKey(CLUSTER_DOMAIN, "disp-basic")!;
+
+  // Membership edges STAY. (member1/member2 are bare ids with no
+  // backing node — dangling targetRef edges; includeDangling: true
+  // resolves them, same as `membersOf`'s own convention.)
+  const groupsEdges = graph.edgesFrom(clusterNode.id, {
+    type: GROUPS_EDGE_TYPE,
+    includeDangling: true,
+  });
+  assert.equal(groupsEdges.length, 2);
+
+  // New: analysis-disposition edges, one per member, single kind "groups".
+  const dispositionEdges = graph.edgesFrom(clusterNode.id, {
+    type: ANALYSIS_DISPOSITION_EDGE_TYPE,
+    includeDangling: true,
+  });
+  assert.equal(dispositionEdges.length, 2);
+  const targets = dispositionEdges
+    .map((e) => e.targetId ?? e.targetRef)
+    .sort();
+  assert.deepEqual(targets, ["member1", "member2"]);
+  for (const e of dispositionEdges) {
+    assert.equal(e.subtype, "groups");
+    assert.deepEqual(e.metadata?.kinds, ["groups"]);
+  }
+});
+
+test("insertCluster — analysis-disposition edges idempotent on identical content-hash (no duplicates)", () => {
+  const graph = makeGraph();
+  const overlay = makeClusterOverlay(graph);
+  const input = {
+    clusterId: "disp-idem",
+    name: "cluster-disp-idem",
+    memberCount: 1,
+    contentHash: "ch_idem",
+    memberElementIds: ["m1"],
+  };
+  overlay.insertCluster(input);
+  overlay.insertCluster(input);
+  const clusterNode = graph.getLiveNodeByNaturalKey(CLUSTER_DOMAIN, "disp-idem")!;
+  const dispositionEdges = graph.edgesFrom(clusterNode.id, {
+    type: ANALYSIS_DISPOSITION_EDGE_TYPE,
+    includeDangling: true,
+  });
+  assert.equal(dispositionEdges.length, 1);
+});
+
+test("insertCluster — analysis-disposition edges reconcile on drift-down, mirroring groups edges (Fathom row 3.1.8.4 wave 3a)", () => {
+  // Same shape as "insertCluster — drops members no longer in input
+  // (drift-down)" above, but for the new disposition-edge family: a
+  // stale disposition edge to a member that left the cluster must
+  // tombstone, not linger — a lingering edge would silently misstate
+  // provenance (cluster claims a member it no longer has).
+  const graph = makeGraph();
+  const overlay = makeClusterOverlay(graph);
+
+  graph.transaction(
+    { kind: "test-elements", producerDomain: "analysis", summary: "init" },
+    () => {
+      graph.insertNode({ domain: "analysis", naturalKey: "m1", contentHash: "h1" });
+      graph.insertNode({ domain: "analysis", naturalKey: "m2", contentHash: "h2" });
+      graph.insertNode({ domain: "analysis", naturalKey: "m3", contentHash: "h3" });
+    },
+  );
+  const m1 = graph.getLiveNodeByNaturalKey("analysis", "m1")!;
+  const m2 = graph.getLiveNodeByNaturalKey("analysis", "m2")!;
+  const m3 = graph.getLiveNodeByNaturalKey("analysis", "m3")!;
+
+  overlay.insertCluster({
+    clusterId: "disp-drift",
+    name: "cluster-disp-drift",
+    memberCount: 3,
+    contentHash: "ch-drift-v1",
+    memberElementIds: [m1.id, m2.id, m3.id],
+  });
+  const clusterNode = graph.getLiveNodeByNaturalKey(CLUSTER_DOMAIN, "disp-drift")!;
+  assert.equal(
+    graph.edgesFrom(clusterNode.id, { type: ANALYSIS_DISPOSITION_EDGE_TYPE }).length,
+    3,
+  );
+
+  // Re-cluster with only m1; m2/m3 left the community.
+  overlay.insertCluster({
+    clusterId: "disp-drift",
+    name: "cluster-disp-drift",
+    memberCount: 1,
+    contentHash: "ch-drift-v1",
+    memberElementIds: [m1.id],
+  });
+  const liveDispositionEdges = graph.edgesFrom(clusterNode.id, {
+    type: ANALYSIS_DISPOSITION_EDGE_TYPE,
+  });
+  assert.equal(liveDispositionEdges.length, 1);
+  assert.equal(liveDispositionEdges[0]!.targetId, m1.id);
+});
+
+test("renameCluster — PRESERVES analysis-disposition edges through supersede, mirroring groups edges (Fathom row 3.1.8.4 wave 3a)", () => {
+  const graph = makeGraph();
+  const overlay = makeClusterOverlay(graph);
+  overlay.insertCluster({
+    clusterId: "disp-rename",
+    name: "cluster-disp-rename",
+    memberCount: 3,
+    contentHash: "h1",
+    memberElementIds: ["m1", "m2", "m3"],
+  });
+  overlay.renameCluster("disp-rename", "Operator-Picked Name");
+  const clusterNode = graph.getLiveNodeByNaturalKey(CLUSTER_DOMAIN, "disp-rename")!;
+  const dispositionEdges = graph.edgesFrom(clusterNode.id, {
+    type: ANALYSIS_DISPOSITION_EDGE_TYPE,
+    includeDangling: true,
+  });
+  assert.equal(
+    dispositionEdges.length,
+    3,
+    "renameCluster lost analysis-disposition edges — same class of bug 5.0.39 fixed for groups edges",
+  );
 });

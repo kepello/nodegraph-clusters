@@ -2,6 +2,22 @@
 
 All notable changes to `@kepello/nodegraph-clusters`. Format follows [Keep a Changelog](https://keepachangelog.com/).
 
+## [0.16.0] — 2026-07-16
+
+Fathom row 3.1.8.4 (disposition-layer), wave 3a — ADDITIVE. `insertCluster`'s member-edge reconciliation now ALSO emits `analysis-disposition` edges (`@kepello/nodegraph-dispositions`), one per member, carrying the single positive kind `groups`. Membership (`groups`) edges are unchanged and stay live — the two families coexist until wave 4 retires membership emission in favor of reading the disposition edges directly. No refusal work in this wave: L3's negative dispositions (the `kind-ineligible` / `fixture` refusal points) already live on the `fathom-cli` side since wave 2, and wave 2's corpus measurement found L3's conservation residual already at 0 — nothing for this repo to name.
+
+### Added
+
+- New peer dependency `@kepello/nodegraph-dispositions@^0.1.0`. `ClusterOverlayImpl` constructs its own `DispositionOverlay` (idempotent registration, mirrors this package's own `registerOverlay` idempotency) and calls `recordDispositions` through THIS overlay's own `CLUSTER_DOMAIN`-scoped mutator — per the disposition package's own `overlay.ts` doc comment, `analysis-disposition` edges are sourced in the PRODUCING domain (substrate rule 5.0.42: a `GraphMutator<TDomain>` may only author edges whose source node is in `TDomain`), never in `disposition`'s own domain.
+- `reconcileDispositionEdges` (private): mirrors `reconcileGroupsEdges` exactly — tombstones any live `analysis-disposition` edge whose target left the desired member set (a member that drifted out of the cluster), then `recordDispositions`s the full desired set (create-or-update; unchanged members are a no-op via the disposition overlay's own existing-edge collapse). Called from the same single integration point `reconcileGroupsEdges` already serves for `insertCluster`, `renameCluster`, and `setEnrichment` — so all three write paths stay in sync without three separate call sites.
+
+### Tests
+
+- 4 new regressions (66/66 total, was 62): disposition edges emitted alongside groups edges with `subtype: "groups"` + `metadata.kinds: ["groups"]`; idempotent on identical content-hash (no duplicate edges); reconcile on drift-down (stale disposition edge to a departed member tombstones, mirroring the existing groups-edge drift-down pin); preserved through `renameCluster`'s `supersedeNode` (same class of bug 5.0.39 fixed for groups edges — a raw `supersedeNode` cascades the prior tip's outgoing edges to tombstoned, so every metadata-only supersede path MUST re-reconcile both edge families).
+- RED witnessed first: all 4 new tests failed against the pre-fix overlay (`0 !== 2` / `0 !== 1` / `0 !== 3` / `0 !== 3`) before `reconcileDispositionEdges` was wired in.
+- Downstream file:-linked consumers verified unaffected (additive; public `ClusterOverlay` API surface unchanged): `nodegraph-layering` (46/46), `nodegraph-llm-enrichment` (31/31) — both pass unmodified.
+- `npm run build` clean.
+
 ## [0.15.0] — 2026-07-14
 
 Fathom row `overlay-projection-discards-14-of-19-facets` (3.1.0.7) — `fathom-cli`'s abstractions runner used to hand-project each L0 element down to `id`/`identityKey`/`name`/`contentHash`/`language` before calling `computeClusters`. Adds the field this row's shared facet bag lands on; `computeClusters` itself is unchanged (`facets` is not read by this package).
