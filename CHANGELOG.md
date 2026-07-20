@@ -2,6 +2,18 @@
 
 All notable changes to `@kepello/nodegraph-clusters`. Format follows [Keep a Changelog](https://keepachangelog.com/).
 
+## [0.17.1] — 2026-07-19
+
+Peer-floor sync, 5.0.139 sweep-gap cascade — no code change. `@kepello/nodegraph-dispositions` peer floor `^0.2.0` → `^0.3.0`: `0.3.0` is the first `nodegraph-dispositions` release to stamp `owner` on the disposition edges it writes (Fathom row 5.0.139), and the 0.x caret doesn't admit the minor bump without this floor update.
+
+### Changed
+
+- `package.json` — `@kepello/nodegraph-dispositions` peer floor `^0.2.0` → `^0.3.0`.
+
+### Tests
+
+Suite unchanged: 67/67 pass. `npm run build` clean.
+
 ## [0.17.0] — 2026-07-16
 
 Fathom row 3.1.8.4 (disposition-layer), wave 4 — THE BREAKING WAVE. `nodegraph-clusters` is the wave's reference implementation (it already had full disposition-edge drift reconciliation since wave 3a). The legacy `groups` edge type is RETIRED: `insertCluster`/`renameCluster`/`setEnrichment` no longer emit it, and `clusterForElement`/`membersOf`/`liveMemberCount` no longer read it. `analysis-disposition` edges (kind `groups`, single-kind) are now THE membership record — public `ClusterOverlay` method SIGNATURES are unchanged, but the substrate edge shape underneath every one of them is.
